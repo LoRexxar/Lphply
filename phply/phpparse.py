@@ -25,17 +25,19 @@ precedence = (
     ('left', 'LOGICAL_XOR'),
     ('left', 'LOGICAL_AND'),
     ('right', 'PRINT'),
-    ('left', 'EQUALS', 'PLUS_EQUAL', 'MINUS_EQUAL', 'MUL_EQUAL', 'DIV_EQUAL', 'CONCAT_EQUAL', 'MOD_EQUAL', 'AND_EQUAL', 'OR_EQUAL', 'XOR_EQUAL', 'SL_EQUAL', 'SR_EQUAL'),
+    ('left', 'EQUALS', 'PLUS_EQUAL', 'MINUS_EQUAL', 'MUL_EQUAL', 'DIV_EQUAL', 'CONCAT_EQUAL', 'MOD_EQUAL', 'AND_EQUAL', 'OR_EQUAL', 'XOR_EQUAL', 'SL_EQUAL', 'SR_EQUAL', 'COALESCE_EQUAL', 'POW_EQUAL'),
     ('left', 'QUESTION', 'COLON'),
     ('left', 'BOOLEAN_OR'),
+    ('right', 'COALESCE'),
     ('left', 'BOOLEAN_AND'),
     ('left', 'OR'),
     ('left', 'XOR'),
     ('left', 'AND'),
     ('nonassoc', 'IS_EQUAL', 'IS_NOT_EQUAL', 'IS_IDENTICAL', 'IS_NOT_IDENTICAL'),
-    ('nonassoc', 'IS_SMALLER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER', 'IS_GREATER_OR_EQUAL'),
+    ('nonassoc', 'IS_SMALLER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER', 'IS_GREATER_OR_EQUAL', 'SPACESHIP'),
     ('left', 'SL', 'SR'),
     ('left', 'PLUS', 'MINUS', 'CONCAT'),
+    ('right', 'POW'),
     ('left', 'MUL', 'DIV', 'MOD'),
     ('right', 'BOOLEAN_NOT'),
     ('nonassoc', 'INSTANCEOF'),
@@ -498,8 +500,8 @@ def p_unset_variable(p):
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
-    'function_declaration_statement : FUNCTION is_reference STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE'
-    p[0] = ast.Function(p[3], p[5], p[8], p[2], lineno=p.lineno(1))
+    'function_declaration_statement : FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type LBRACE inner_statement_list RBRACE'
+    p[0] = ast.Function(p[3], p[5], p[9], p[2], return_type=p[7], lineno=p.lineno(1))
 
 def p_class_declaration_statement(p):
     '''class_declaration_statement : class_entry_type STRING extends_from implements_list LBRACE class_statement_list RBRACE
@@ -596,19 +598,21 @@ def p_trait_statement_list(p):
         p[0] = []
 
 def p_trait_statement(p):
-    '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN method_body
-                       | variable_modifiers class_variable_declaration SEMI
+    '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                       | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
                        | USE fully_qualified_class_name SEMI'''
-    if len(p) == 9:
-        p[0] = ast.Method(p[4], p[1], p[6], p[8], p[3], lineno=p.lineno(2))
+    if len(p) == 10:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    elif len(p) == 5:
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], lineno=p.lineno(4))
     else:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
         else:
-            p[0] = ast.ClassVariables(p[1], p[2], lineno=p.lineno(3))
+            p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
 def p_class_statement_list(p):
     '''class_statement_list : class_statement_list class_statement
@@ -620,20 +624,22 @@ def p_class_statement_list(p):
         p[0] = []
 
 def p_class_statement(p):
-    '''class_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN method_body
-                       | variable_modifiers class_variable_declaration SEMI
+    '''class_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                       | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
                        | USE fully_qualified_class_name SEMI'''
-    if len(p) == 9:
-        p[0] = ast.Method(p[4], p[1], p[6], p[8], p[3], lineno=p.lineno(2))
+    if len(p) == 10:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    elif len(p) == 5:
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], lineno=p.lineno(4))
     elif len(p) == 4:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
         else:
-            p[0] = ast.ClassVariables(p[1], p[2], lineno=p.lineno(3))
+            p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     else:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
@@ -737,6 +743,30 @@ def p_parameter_list_empty(p):
     'parameter_list : empty'
     p[0] = []
 
+def p_type_expr(p):
+    'type_expr : fully_qualified_class_name'
+    p[0] = p[1]
+
+def p_type_expr_nullable(p):
+    'type_expr : QUESTION type_expr'
+    p[0] = "?" + p[2]
+
+def p_optional_return_type(p):
+    '''optional_return_type : COLON type_expr
+                            | empty'''
+    if len(p) == 3:
+        p[0] = p[2]
+    else:
+        p[0] = None
+
+def p_optional_property_type(p):
+    '''optional_property_type : type_expr
+                              | empty'''
+    if len(p) == 2 and p[1] is not None:
+        p[0] = p[1]
+    else:
+        p[0] = None
+
 def p_parameter(p):
     '''parameter : VARIABLE
                  | class_name VARIABLE
@@ -745,23 +775,43 @@ def p_parameter(p):
                  | VARIABLE EQUALS static_scalar
                  | class_name VARIABLE EQUALS static_scalar
                  | AND VARIABLE EQUALS static_scalar
-                 | class_name AND VARIABLE EQUALS static_scalar'''
+                 | class_name AND VARIABLE EQUALS static_scalar
+                 | QUESTION class_name VARIABLE
+                 | QUESTION class_name AND VARIABLE
+                 | QUESTION class_name VARIABLE EQUALS static_scalar
+                 | QUESTION class_name AND VARIABLE EQUALS static_scalar'''
+    is_nullable = p[1] == '?'
+    if is_nullable:
+        offset = 1
+        type_hint = "?" + p[2]
+    else:
+        offset = 0
+        type_hint = p[1] if len(p) >= 2 and p[1] not in ('&',) else None
+
     if len(p) == 2: # VARIABLE
         p[0] = ast.FormalParameter(p[1], None, False, None, lineno=p.lineno(1))
     elif len(p) == 3 and p[1] == '&': # AND VARIABLE
         p[0] = ast.FormalParameter(p[2], None, True, None, lineno=p.lineno(1))
-    elif len(p) == 3 and p[1] != '&': # STRING VARIABLE
+    elif len(p) == 3 and p[1] != '&': # class_name VARIABLE
         p[0] = ast.FormalParameter(p[2], None, False, p[1], lineno=p.lineno(1))
+    elif len(p) == 4 and p[1] == '?': # QUESTION class_name VARIABLE
+        p[0] = ast.FormalParameter(p[3], None, False, type_hint, lineno=p.lineno(1))
     elif len(p) == 4 and p[2] != '&': # VARIABLE EQUALS static_scalar
         p[0] = ast.FormalParameter(p[1], p[3], False, None, lineno=p.lineno(1))
-    elif len(p) == 4 and p[2] == '&': # STRING AND VARIABLE
+    elif len(p) == 4 and p[2] == '&': # class_name AND VARIABLE
         p[0] = ast.FormalParameter(p[3], None, True, p[1], lineno=p.lineno(1))
     elif len(p) == 5 and p[1] == '&': # AND VARIABLE EQUALS static_scalar
         p[0] = ast.FormalParameter(p[2], p[4], True, None, lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] != '&': # class_name VARIABLE EQUALS static_scalar
+    elif len(p) == 5 and p[1] != '&' and p[1] != '?': # class_name VARIABLE EQUALS static_scalar
         p[0] = ast.FormalParameter(p[2], p[4], False, p[1], lineno=p.lineno(1))
-    else: # STRING AND VARIABLE EQUALS static_scalar
+    elif len(p) == 5 and p[1] == '?': # QUESTION class_name AND VARIABLE
+        p[0] = ast.FormalParameter(p[4], None, True, type_hint, lineno=p.lineno(1))
+    elif len(p) == 6 and p[1] == '?': # QUESTION class_name VARIABLE EQUALS static_scalar
+        p[0] = ast.FormalParameter(p[3], p[5], False, type_hint, lineno=p.lineno(1))
+    elif len(p) == 6 and p[1] != '?': # class_name AND VARIABLE EQUALS static_scalar
         p[0] = ast.FormalParameter(p[3], p[5], True, p[1], lineno=p.lineno(1))
+    else: # QUESTION class_name AND VARIABLE EQUALS static_scalar (len=7)
+        p[0] = ast.FormalParameter(p[4], p[6], True, type_hint, lineno=p.lineno(1))
 
 def p_expr_variable(p):
     'expr : variable'
@@ -1149,8 +1199,18 @@ def p_expr_assign_op(p):
             | variable OR_EQUAL expr
             | variable XOR_EQUAL expr
             | variable SL_EQUAL expr
-            | variable SR_EQUAL expr'''
+            | variable SR_EQUAL expr
+            | variable COALESCE_EQUAL expr
+            | variable POW_EQUAL expr'''
     p[0] = ast.AssignOp(p[2], p[1], p[3], lineno=p.lineno(2))
+
+def p_function_call_parameter_ellipsis(p):
+    'function_call_parameter : ELLIPSIS expr'
+    p[0] = ast.Parameter(p[2], False, lineno=p.lineno(1))
+
+def p_expr_arrow_function(p):
+    'expr : FN is_reference LPAREN parameter_list RPAREN DOUBLE_ARROW expr'
+    p[0] = ast.ArrowFunction(p[4], p[7], None, p[2], lineno=p.lineno(1))
 
 def p_expr_binary_op(p):
     '''expr : expr BOOLEAN_AND expr
@@ -1178,7 +1238,10 @@ def p_expr_binary_op(p):
             | expr IS_GREATER expr
             | expr IS_GREATER_OR_EQUAL expr
             | expr INSTANCEOF expr
-            | expr INSTANCEOF STATIC'''
+            | expr INSTANCEOF STATIC
+            | expr COALESCE expr
+            | expr SPACESHIP expr
+            | expr POW expr'''
     p[0] = ast.BinaryOp(p[2].lower(), p[1], p[3], lineno=p.lineno(2))
 
 def p_expr_unary_op(p):

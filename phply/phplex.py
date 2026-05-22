@@ -2,6 +2,7 @@
 # phplex.py
 #
 # A lexer for PHP.
+# PHP 7.0-7.4 lexer support added
 # ----------------------------------------------------------------------
 
 import ply.lex as lex
@@ -34,7 +35,7 @@ reserved = (
     'REQUIRE_ONCE', 'RETURN', 'STATIC', 'SWITCH', 'UNSET', 'USE', 'VAR',
     'WHILE', 'FINAL', 'INTERFACE', 'IMPLEMENTS', 'PUBLIC', 'PRIVATE',
     'PROTECTED', 'ABSTRACT', 'CLONE', 'TRY', 'CATCH', 'THROW', 'NAMESPACE',
-    'FINALLY', 'TRAIT', 'YIELD',
+    'FINALLY', 'TRAIT', 'YIELD', 'FN',
 )
 
 # Not used by parser
@@ -56,10 +57,13 @@ tokens = reserved + unparsed + (
     'IS_GREATER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER_OR_EQUAL', 'IS_EQUAL',
     'IS_NOT_EQUAL', 'IS_IDENTICAL', 'IS_NOT_IDENTICAL',
 
+    # PHP 7.0+ operators
+    'COALESCE', 'SPACESHIP',
+
     # Assignment operators
     'EQUALS', 'MUL_EQUAL', 'DIV_EQUAL', 'MOD_EQUAL', 'PLUS_EQUAL',
     'MINUS_EQUAL', 'SL_EQUAL', 'SR_EQUAL', 'AND_EQUAL', 'OR_EQUAL',
-    'XOR_EQUAL', 'CONCAT_EQUAL',
+    'XOR_EQUAL', 'CONCAT_EQUAL', 'COALESCE_EQUAL', 'POW', 'POW_EQUAL',
 
     # Increment/decrement
     'INC', 'DEC',
@@ -69,7 +73,7 @@ tokens = reserved + unparsed + (
 
     # Delimiters
     'LPAREN', 'RPAREN', 'LBRACKET', 'RBRACKET', 'LBRACE', 'RBRACE', 'DOLLAR',
-    'COMMA', 'CONCAT', 'QUESTION', 'COLON', 'SEMI', 'AT', 'NS_SEPARATOR',
+    'COMMA', 'CONCAT', 'ELLIPSIS', 'QUESTION', 'COLON', 'SEMI', 'AT', 'NS_SEPARATOR',
 
     # Casts
     'ARRAY_CAST', 'BINARY_CAST', 'BOOL_CAST', 'DOUBLE_CAST', 'INT_CAST',
@@ -106,6 +110,15 @@ def t_php_WHITESPACE(t):
 # Operators
 t_php_PLUS                = r'\+'
 t_php_MINUS               = r'-'
+
+def t_php_POW_EQUAL(t):
+    r'\*\*='
+    return t
+
+def t_php_POW(t):
+    r'\*\*'
+    return t
+
 t_php_MUL                 = r'\*'
 t_php_DIV                 = r'/'
 t_php_MOD                 = r'%'
@@ -126,6 +139,7 @@ t_php_IS_EQUAL            = r'=='
 t_php_IS_NOT_EQUAL        = r'(!=(?!=))|(<>)'
 t_php_IS_IDENTICAL        = r'==='
 t_php_IS_NOT_IDENTICAL    = r'!=='
+t_php_SPACESHIP           = r'<=>'
 
 # Assignment operators
 t_php_EQUALS               = r'='
@@ -140,6 +154,10 @@ t_php_AND_EQUAL            = r'&='
 t_php_OR_EQUAL             = r'\|='
 t_php_XOR_EQUAL            = r'\^='
 t_php_CONCAT_EQUAL         = r'\.='
+
+def t_php_COALESCE_EQUAL(t):
+    r'\?\?='
+    return t
 
 # Increment/decrement
 t_php_INC                  = r'\+\+'
@@ -161,7 +179,19 @@ t_php_RPAREN               = r'\)'
 t_php_DOLLAR               = r'\$'
 t_php_COMMA                = r','
 t_php_CONCAT               = r'\.(?!\d|=)'
-t_php_QUESTION             = r'\?'
+
+def t_php_ELLIPSIS(t):
+    r'\.\.\.'
+    return t
+
+def t_php_COALESCE(t):
+    r'\?\?'
+    return t
+
+def t_php_QUESTION(t):
+    r'\?(?![>?%])'
+    return t
+
 t_php_COLON                = r':'
 t_php_SEMI                 = r';'
 t_php_AT                   = r'@'

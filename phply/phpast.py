@@ -8,15 +8,17 @@ class Node(object):
     fields = []
 
     def __init__(self, *args, **kwargs):
-        assert len(self.fields) == len(args), \
-            '%s takes %d arguments' % (self.__class__.__name__,
-                                       len(self.fields))
         try:
             self.lineno = kwargs['lineno']
         except KeyError:
             self.lineno = None
         for i, field in enumerate(self.fields):
-            setattr(self, field, args[i])
+            if i < len(args):
+                setattr(self, field, args[i])
+            elif field in kwargs:
+                setattr(self, field, kwargs[field])
+            else:
+                setattr(self, field, None)
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__,
@@ -85,14 +87,15 @@ Finally = node('Finally', ['nodes'])
 Throw = node('Throw', ['node'])
 Declare = node('Declare', ['directives', 'node'])
 Directive = node('Directive', ['name', 'node'])
-Function = node('Function', ['name', 'params', 'nodes', 'is_ref'])
-Method = node('Method', ['name', 'modifiers', 'params', 'nodes', 'is_ref'])
+Function = node('Function', ['name', 'params', 'nodes', 'is_ref', 'return_type'])
+Method = node('Method', ['name', 'modifiers', 'params', 'nodes', 'is_ref', 'return_type'])
 Closure = node('Closure', ['params', 'vars', 'nodes', 'is_ref'])
+ArrowFunction = node('ArrowFunction', ['params', 'expr', 'return_type', 'is_reference'])
 Class = node('Class', ['name', 'type', 'extends', 'implements', 'traits', 'nodes'])
 Trait = node('Trait', ['name', 'traits', 'nodes'])
 ClassConstants = node('ClassConstants', ['nodes'])
 ClassConstant = node('ClassConstant', ['name', 'initial'])
-ClassVariables = node('ClassVariables', ['modifiers', 'nodes'])
+ClassVariables = node('ClassVariables', ['modifiers', 'nodes', 'property_type'])
 ClassVariable = node('ClassVariable', ['name', 'initial'])
 Interface = node('Interface', ['name', 'extends', 'nodes'])
 AssignOp = node('AssignOp', ['op', 'left', 'right'])

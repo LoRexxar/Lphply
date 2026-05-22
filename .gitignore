@@ -13,3 +13,4 @@ man/
 build/
 dist/
 .venv/
+docs/
