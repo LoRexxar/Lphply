@@ -1427,3 +1427,97 @@ def test_void_cast_function_call():
         input,
         [VoidCast(FunctionCall('getPhpVersion', []))]
     )
+
+# Issue fix tests
+
+def test_issue_61_arrow_function_return_type():
+    """Issue #61: Arrow function with return type"""
+    eq_ast(
+        '<?php $fn = fn(int $x): int => $x * 2;',
+        [Assignment(Variable('$fn'),
+         ArrowFunction([FormalParameter('$x', None, False, 'int')],
+                       BinaryOp('*', Variable('$x'), 2), 'int', False),
+         False)]
+    )
+
+def test_issue_61_arrow_function_nullable_return():
+    """Issue #61: Arrow function with nullable return type"""
+    eq_ast(
+        '<?php $fn = fn(): ?int => null;',
+        [Assignment(Variable('$fn'),
+         ArrowFunction([], Constant('null'), '?int', False),
+         False)]
+    )
+
+def test_issue_54_static_scalar_concat():
+    """Issue #54: Concat in static scalar (class variable default)"""
+    eq_ast(
+        '<?php class Example { private static $var = \'test\' . \'ing\'; }',
+        [Class('Example', None, None, [], [],
+         [ClassVariables(['private', 'static'],
+          [ClassVariable('$var', BinaryOp('.', 'test', 'ing'))],
+          None, None)])]
+    )
+
+def test_issue_54_static_scalar_concat_multi():
+    """Issue #54: Multiple concat in static scalar"""
+    eq_ast(
+        '<?php $x = \'a\' . \'b\' . \'c\';',
+        [Assignment(Variable('$x'),
+         BinaryOp('.', BinaryOp('.', 'a', 'b'), 'c'),
+         False)]
+    )
+
+def test_issue_52_variadic_parameter():
+    """Issue #52/PHP 5.6: Variadic parameter ...$args"""
+    eq_ast(
+        '<?php function foo(...$args) {}',
+        [Function('foo', [FormalParameter('$args', None, False, None)],
+         [], False, None)]
+    )
+
+def test_issue_52_typed_variadic_parameter():
+    """Issue #52: Typed variadic parameter int ...$nums"""
+    eq_ast(
+        '<?php function bar(int ...$nums) {}',
+        [Function('bar', [FormalParameter('$nums', None, False, 'int')],
+         [], False, None)]
+    )
+
+def test_issue_21_invalid_octal():
+    """Issue #21: Invalid octal notation (0987) should parse as 0"""
+    eq_ast(
+        '<?php 0987;',
+        [0]
+    )
+
+def test_issue_21_valid_octal():
+    """Issue #21: Valid octal notation"""
+    eq_ast(
+        '<?php 0777;',
+        [511]
+    )
+
+def test_issue_21_hex_uppercase():
+    """Issue #21: Hex with uppercase 0X prefix"""
+    eq_ast(
+        '<?php 0XFF;',
+        [255]
+    )
+
+def test_issue_21_binary_uppercase():
+    """Issue #21: Binary with uppercase 0B prefix"""
+    eq_ast(
+        '<?php 0B1010;',
+        [10]
+    )
+
+def test_issue_7_end_lineno():
+    """Issue #7: end_lineno support on AST nodes"""
+    from phply import phpast
+    node = phpast.Function('test', [], [], False, None, lineno=5, end_lineno=10)
+    assert node.lineno == 5
+    assert node.end_lineno == 10
+    g = node.generic(with_lineno=True)
+    assert g[1]['lineno'] == 5
+    assert g[1]['end_lineno'] == 10

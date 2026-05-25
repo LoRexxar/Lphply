@@ -12,6 +12,10 @@ class Node(object):
             self.lineno = kwargs['lineno']
         except KeyError:
             self.lineno = None
+        try:
+            self.end_lineno = kwargs['end_lineno']
+        except KeyError:
+            self.end_lineno = None
         for i, field in enumerate(self.fields):
             if i < len(args):
                 setattr(self, field, args[i])
@@ -48,6 +52,7 @@ class Node(object):
         values = {}
         if with_lineno:
             values['lineno'] = self.lineno
+            values['end_lineno'] = self.end_lineno
         for field in self.fields:
             value = getattr(self, field)
             if hasattr(value, 'generic'):

@@ -18,6 +18,21 @@ else:
 # Get the token map
 tokens = phplex.tokens
 
+
+def _linespan(p, n):
+    """Get (start_line, end_line) for symbol n in production p."""
+    try:
+        return p.linespan(n)
+    except AttributeError:
+        line = p.lineno(n)
+        return (line, line)
+
+
+def _mkpos(p, n=1):
+    """Create lineno/end_lineno kwargs from production p at symbol n."""
+    start, end = _linespan(p, n)
+    return {'lineno': start, 'end_lineno': end}
+
 precedence = (
     ('left', 'INCLUDE', 'INCLUDE_ONCE', 'EVAL', 'REQUIRE', 'REQUIRE_ONCE'),
     ('left', 'COMMA'),
@@ -975,11 +990,15 @@ def _parse_parameter(parts, lineno):
         return ast.FormalParameter(parts[1], None, False, None, lineno=lineno)
     elif n == 2 and parts[1] == '&':  # AND VARIABLE
         return ast.FormalParameter(parts[2], None, True, None, lineno=lineno)
-    elif n == 2 and parts[1] != '&':  # class_name VARIABLE
+    elif n == 2 and parts[1] == '...':  # ELLIPSIS VARIABLE (variadic)
+        return ast.FormalParameter(parts[2], None, False, None, lineno=lineno)
+    elif n == 2 and parts[1] != '&' and parts[1] != '...':  # class_name VARIABLE
         return ast.FormalParameter(parts[2], None, False, parts[1], lineno=lineno)
     elif n == 3 and parts[1] == '?':  # QUESTION class_name VARIABLE
         return ast.FormalParameter(parts[3], None, False, type_hint, lineno=lineno)
-    elif n == 3 and parts[2] != '&':  # VARIABLE EQUALS static_scalar
+    elif n == 3 and parts[2] == '...':  # type_expr ELLIPSIS VARIABLE (typed variadic)
+        return ast.FormalParameter(parts[3], None, False, parts[1], lineno=lineno)
+    elif n == 3 and parts[2] != '&' and parts[2] != '...':  # VARIABLE EQUALS static_scalar
         return ast.FormalParameter(parts[1], parts[3], False, None, lineno=lineno)
     elif n == 3 and parts[2] == '&':  # class_name AND VARIABLE
         return ast.FormalParameter(parts[3], None, True, parts[1], lineno=lineno)
@@ -1008,7 +1027,9 @@ def p_parameter(p):
                  | QUESTION type_expr VARIABLE
                  | QUESTION type_expr AND VARIABLE
                  | QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+                 | QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | ELLIPSIS VARIABLE
+                 | type_expr ELLIPSIS VARIABLE'''
     p[0] = _parse_parameter(list(p), p.lineno(1))
 
 def p_parameter_promoted(p):
@@ -1477,8 +1498,8 @@ def p_function_call_parameter_ellipsis(p):
     p[0] = ast.Parameter(p[2], False, lineno=p.lineno(1))
 
 def p_expr_arrow_function(p):
-    'expr : FN is_reference LPAREN parameter_list RPAREN DOUBLE_ARROW expr'
-    p[0] = ast.ArrowFunction(p[4], p[7], None, p[2], lineno=p.lineno(1))
+    '''expr : FN is_reference LPAREN parameter_list RPAREN optional_return_type DOUBLE_ARROW expr'''
+    p[0] = ast.ArrowFunction(p[4], p[8], p[6], p[2], lineno=p.lineno(1))
 
 def p_expr_binary_op(p):
     '''expr : expr BOOLEAN_AND expr
@@ -1707,12 +1728,15 @@ def p_class_constant(p):
 
 def p_common_scalar_lnumber(p):
     'common_scalar : LNUMBER'
-    if p[1].startswith('0x'):
+    if p[1].startswith('0x') or p[1].startswith('0X'):
         p[0] = int(p[1], 16)
-    elif p[1].startswith('0b'):
+    elif p[1].startswith('0b') or p[1].startswith('0B'):
         p[0] = int(p[1], 2)
-    elif p[1].startswith('0'):
+    elif p[1].startswith('0') and len(p[1]) > 1 and all(c in '01234567' for c in p[1][1:]):
         p[0] = int(p[1], 8)
+    elif p[1].startswith('0') and len(p[1]) > 1:
+        # Invalid octal (e.g. 0987) - PHP 7+ treats as parse error, value 0
+        p[0] = 0
     else:
         p[0] = int(p[1])
 
@@ -1811,6 +1835,10 @@ def p_static_scalar_unary_op(p):
     '''static_scalar : PLUS static_scalar
                      | MINUS static_scalar'''
     p[0] = ast.UnaryOp(p[1], p[2], lineno=p.lineno(1))
+
+def p_static_scalar_concat(p):
+    '''static_scalar : static_scalar CONCAT static_scalar'''
+    p[0] = ast.BinaryOp('.', p[1], p[3], lineno=p.lineno(2))
 
 def p_static_scalar_array(p):
     '''static_scalar : ARRAY LPAREN static_array_pair_list RPAREN

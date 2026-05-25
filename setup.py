@@ -1,10 +1,14 @@
 # coding: utf-8
-from __future__ import unicode_literals
-
 from setuptools import setup, find_packages, Command
-from distutils.command.build import build as distutils_build
 
-distutils_build.sub_commands.insert(0, ('gen_parsetab', lambda _: True))
+try:
+    from setuptools.command.build import build as setuptools_build
+except ImportError:
+    from distutils.command.build import build as setuptools_build
+
+# Override build sub_commands to generate parsetab before build
+original_sub_commands = setuptools_build.sub_commands[:]
+setuptools_build.sub_commands = [('gen_parsetab', lambda _: True)] + original_sub_commands
 
 
 class GenerateParsetab(Command):
@@ -23,7 +27,6 @@ class GenerateParsetab(Command):
 setup(name="phply",
       version="1.2.6",
       packages=find_packages(),
-      namespace_packages=['phply'],
       include_package_data=True,
       author='Ramen',
       author_email='',
@@ -63,5 +66,6 @@ setup(name="phply",
 
       cmdclass={
           'gen_parsetab': GenerateParsetab,
+          'build': setuptools_build,
           }
       )

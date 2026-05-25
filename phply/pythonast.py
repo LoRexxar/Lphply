@@ -103,7 +103,7 @@ def from_phpast(node):
             args.append(from_phpast(node.expr))
         return py.Raise(py.Call(py.Name('Exit', py.Load(**pos(node)),
                                         **pos(node)),
-                                args, [], None, None, **pos(node)),
+                                args, [], **pos(node)),
                         None, None, **pos(node))
 
     if isinstance(node, php.Return):
@@ -140,13 +140,13 @@ def from_phpast(node):
                                    **pos(node)),
                            [from_phpast(node.nodes[0].node),
                             from_phpast(node.nodes[0].name)],
-                           [], None, None, **pos(node))
+                           [], **pos(node))
         if isinstance(node.nodes[0], php.Variable):
             return py.Compare(py.Str(node.nodes[0].name[1:], **pos(node)),
                               [py.In(**pos(node))],
                               [py.Call(py.Name('vars', py.Load(**pos(node)),
                                                **pos(node)),
-                                       [], [], None, None, **pos(node))],
+                                       [], [], **pos(node))],
                               **pos(node))
         return py.Compare(from_phpast(node.nodes[0]),
                           [py.IsNot(**pos(node))],
@@ -169,7 +169,7 @@ def from_phpast(node):
                                         'append', py.Load(**pos(node)),
                                         **pos(node)),
                            [from_phpast(node.expr)],
-                           [], None, None, **pos(node))
+                           [], **pos(node))
         if (isinstance(node.node, php.ObjectProperty)
             and isinstance(node.node.name, php.BinaryOp)):
             return to_stmt(py.Call(py.Name('setattr', py.Load(**pos(node)),
@@ -177,7 +177,7 @@ def from_phpast(node):
                            [from_phpast(node.node.node),
                             from_phpast(node.node.name),
                             from_phpast(node.expr)],
-                           [], None, None, **pos(node)))
+                           [], **pos(node)))
         return py.Assign([store(from_phpast(node.node))],
                          from_phpast(node.expr),
                          **pos(node))
@@ -219,7 +219,7 @@ def from_phpast(node):
                                    **pos(node)),
                            [from_phpast(node.node),
                             from_phpast(node.name)],
-                           [], None, None, **pos(node))
+                           [], **pos(node))
         return py.Attribute(from_phpast(node.node),
                             node.name,
                             py.Load(**pos(node)),
@@ -247,7 +247,7 @@ def from_phpast(node):
         return py.Call(py.Name('include', py.Load(**pos(node)),
                                **pos(node)),
                        [from_phpast(node.expr), once],
-                       [], None, None, **pos(node))
+                       [], **pos(node))
 
     if isinstance(node, php.Require):
         once = py.Name('True' if node.once else 'False',
@@ -256,7 +256,7 @@ def from_phpast(node):
         return py.Call(py.Name('require', py.Load(**pos(node)),
                                **pos(node)),
                        [from_phpast(node.expr), once],
-                       [], None, None, **pos(node))
+                       [], **pos(node))
 
     if isinstance(node, php.UnaryOp):
         op = unary_ops.get(node.op)
@@ -287,7 +287,7 @@ def from_phpast(node):
                               **pos(node))
         op = binary_ops.get(node.op)
         if node.op == 'instanceof':
-            return py.Call(func=py.Name(id='isinstance', ctx=py.Load(**pos(node))), args=[from_phpast(node.left), from_phpast(node.right)], keywords=[], starargs=None, kwargs=None )
+            return py.Call(func=py.Name(id='isinstance', ctx=py.Load(**pos(node))), args=[from_phpast(node.left), from_phpast(node.right)], keywords=[] )
         assert op is not None, "unknown binary operator: '%s'" % node.op
         op = op(**pos(node))
         return py.BinOp(from_phpast(node.left),
@@ -306,7 +306,7 @@ def from_phpast(node):
                                py.Load(**pos(node)),
                                **pos(node)),
                        [from_phpast(node.expr)],
-                       [], None, None, **pos(node))
+                       [], **pos(node))
 
     if isinstance(node, php.If):
         orelse = []
@@ -374,7 +374,7 @@ def from_phpast(node):
                             **pos(node))
 
     if isinstance(node, php.Throw):
-        return py.Raise(from_phpast(node.node), None, None, **pos(node))
+        return py.Raise(from_phpast(node.node), **pos(node))
 
     if isinstance(node, php.Function):
         args = []
@@ -445,14 +445,14 @@ def from_phpast(node):
         if isinstance(node.name, str):
             name = py.Name(node.name, py.Load(**pos(node)), **pos(node))
         else:
-            name = py.Subscript(py.Call(py.Name('vars', py.Load(**pos(node)),
+            name = py.Subscript(py.Call(func=py.Name('vars', py.Load(**pos(node)),
                                                 **pos(node)),
-                                        [], [], None, None, **pos(node)),
+                           args=[], keywords=[], **pos(node)),
                                 py.Index(from_phpast(node.name), **pos(node)),
                                 py.Load(**pos(node)),
                                 **pos(node))
         args, kwargs = build_args(node.params)
-        return py.Call(name, args, kwargs, None, None, **pos(node))
+        return py.Call(func=name, args=args, keywords=kwargs, **pos(node))
 
     if isinstance(node, php.MethodCall):
         args, kwargs = build_args(node.params)
@@ -460,7 +460,7 @@ def from_phpast(node):
                                     node.name,
                                     py.Load(**pos(node)),
                                     **pos(node)),
-                       args, kwargs, None, None, **pos(node))
+                       args, kwargs, **pos(node))
 
     if isinstance(node, php.StaticMethodCall):
         class_ = node.class_
@@ -471,7 +471,7 @@ def from_phpast(node):
                                     node.name,
                                     py.Load(**pos(node)),
                                     **pos(node)),
-                       args, kwargs, None, None, **pos(node))
+                       args, kwargs, **pos(node))
 
     if isinstance(node, php.StaticProperty):
         class_ = node.node
@@ -486,7 +486,7 @@ def from_phpast(node):
 
     return py.Call(py.Name('XXX', py.Load(**pos(node)), **pos(node)),
                    [py.Str(str(node), **pos(node))],
-                   [], None, None, **pos(node))
+                   [], **pos(node))
 
 def pos(node):
     return {'lineno': getattr(node, 'lineno', 0), 'col_offset': 0}

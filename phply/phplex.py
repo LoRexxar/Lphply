@@ -321,7 +321,7 @@ def t_php_DNUMBER(t):
 
 # Integer literal
 def t_php_LNUMBER(t):
-    r'(0b[01]+)|(0x[0-9A-Fa-f]+)|\d+'
+    r'(0[bB][01]+)|(0[xX][0-9A-Fa-f]+)|\d+'
     return t
 
 # String literal
