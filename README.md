@@ -10,6 +10,8 @@ Supports PHP **5.6 through 8.5** syntax.
 pip install lphply
 ```
 
+> **注意：** 由于 `lphply` 的内部包名仍为 `phply`，与上游 `viraptor/phply` 的 PyPI 包冲突。如果之前安装过 `phply`，请先卸载：`pip uninstall phply && pip install lphply`。
+
 ## Usage
 
 ### Lexer
