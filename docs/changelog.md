@@ -2,7 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - PHP 8.2-8.5 语法支持
+## [Unreleased] - PHP 8.2-8.5 语法支持 + 上游 Issue 修复
+
+### 上游 Issue 修复 (commit d847433)
+
+**修复 viraptor/phply 的 8 个 issue：**
+
+- **#62**: `setup.py` 改用 `setuptools.command.build` 替代已弃用的 `distutils`
+- **#61**: Arrow function 支持返回类型声明 (`fn(int $x): int => $x * 2`)
+- **#60/#59**: 移除 `declare_namespace()` 消除 PEP 420 deprecation warning
+- **#55**: `pythonast.py` 中 `py.Call`/`py.Raise` 签名兼容 Python 3.8+（移除 `starargs`/`kwargs`）
+- **#54**: Static scalar 支持 concat 运算符（`'a' . 'b'` 在类属性默认值中）
+- **#52**: 补充 variadic 参数支持（`...$args`、`int ...$nums`）
+- **#21**: 无效八进制数（`0987`）不再崩溃，返回 0；支持大写 `0X`/`0B` 前缀
+- **#7**: AST Node 添加 `end_lineno` 字段 + `_linespan()`/`_mkpos()` 辅助函数
+
+**测试：** 116/116 通过（+11 新测试）
+
+---
 
 ### PHP 8.5 (commit 5eebb56)
 
