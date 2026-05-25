@@ -35,13 +35,15 @@ precedence = (
     ('left', 'AND'),
     ('nonassoc', 'IS_EQUAL', 'IS_NOT_EQUAL', 'IS_IDENTICAL', 'IS_NOT_IDENTICAL'),
     ('nonassoc', 'IS_SMALLER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER', 'IS_GREATER_OR_EQUAL', 'SPACESHIP'),
+    # PHP 8.5: Pipe operator precedence (between comparison and concat, like PHP's zend_parser)
+    ('left', 'PIPE'),
     ('left', 'SL', 'SR'),
     ('left', 'PLUS', 'MINUS', 'CONCAT'),
     ('right', 'POW'),
     ('left', 'MUL', 'DIV', 'MOD'),
     ('right', 'BOOLEAN_NOT'),
     ('nonassoc', 'INSTANCEOF'),
-    ('right', 'NOT', 'INC', 'DEC', 'INT_CAST', 'DOUBLE_CAST', 'STRING_CAST', 'ARRAY_CAST', 'OBJECT_CAST', 'BOOL_CAST', 'UNSET_CAST', 'AT'),
+    ('right', 'NOT', 'INC', 'DEC', 'INT_CAST', 'DOUBLE_CAST', 'STRING_CAST', 'ARRAY_CAST', 'OBJECT_CAST', 'BOOL_CAST', 'UNSET_CAST', 'VOID_CAST', 'AT'),
     ('right', 'LBRACKET'),
     ('nonassoc', 'NEW', 'CLONE'),
     ('left', 'THROW'),
@@ -1127,8 +1129,18 @@ def p_ctor_arguments(p):
         p[0] = []
 
 def p_expr_clone(p):
-    'expr : CLONE expr'
-    p[0] = ast.Clone(p[2], lineno=p.lineno(1))
+    '''expr : CLONE expr
+            | CLONE LPAREN expr COMMA expr RPAREN'''
+    if len(p) == 3:
+        p[0] = ast.Clone(p[2], lineno=p.lineno(1))
+    else:
+        # PHP 8.5: clone($obj, ['prop' => $val])
+        p[0] = ast.CloneWith(p[3], p[5], lineno=p.lineno(1))
+
+# PHP 8.5: Pipe operator
+def p_expr_pipe(p):
+    'expr : expr PIPE expr'
+    p[0] = ast.Pipe(p[1], p[3], lineno=p.lineno(2))
 
 def p_expr_list_assign(p):
     'expr : LIST LPAREN assignment_list RPAREN EQUALS expr'
@@ -1556,6 +1568,11 @@ def p_expr_cast_unset(p):
 def p_expr_cast_binary(p):
     'expr : BINARY_CAST expr'
     p[0] = ast.Cast('binary', p[2], lineno=p.lineno(1))
+
+# PHP 8.5: void cast
+def p_expr_cast_void(p):
+    'expr : VOID_CAST expr'
+    p[0] = ast.VoidCast(p[2], lineno=p.lineno(1))
 
 def p_expr_isset(p):
     'expr : ISSET LPAREN isset_variables RPAREN'

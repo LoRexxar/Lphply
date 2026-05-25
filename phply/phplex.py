@@ -79,9 +79,14 @@ tokens = reserved + unparsed + (
     'LPAREN', 'RPAREN', 'LBRACKET', 'RBRACKET', 'LBRACE', 'RBRACE', 'DOLLAR',
     'COMMA', 'CONCAT', 'ELLIPSIS', 'QUESTION', 'COLON', 'SEMI', 'AT', 'NS_SEPARATOR',
 
+    # PHP 8.5: Pipe operator
+    'PIPE',
+
     # Casts
     'ARRAY_CAST', 'BINARY_CAST', 'BOOL_CAST', 'DOUBLE_CAST', 'INT_CAST',
     'OBJECT_CAST', 'STRING_CAST', 'UNSET_CAST',
+    # PHP 8.5: void cast
+    'VOID_CAST',
 
     # Escaping from HTML
     'INLINE_HTML',
@@ -127,6 +132,12 @@ t_php_MUL                 = r'\*'
 t_php_DIV                 = r'/'
 t_php_MOD                 = r'%'
 t_php_AND                 = r'&'
+
+# PHP 8.5: Pipe operator |> must match before OR |
+def t_php_PIPE(t):
+    r'\|>'
+    return t
+
 t_php_OR                  = r'\|'
 t_php_NOT                 = r'~'
 t_php_XOR                 = r'\^'
@@ -235,7 +246,9 @@ t_php_DOUBLE_CAST          = r'\([ \t]*([Rr][Ee][Aa][Ll]|[Dd][Oo][Uu][Bb][Ll][Ee
 t_php_INT_CAST             = r'\([ \t]*[Ii][Nn][Tt]([Ee][Gg][Ee][Rr])?[ \t]*\)'
 t_php_OBJECT_CAST          = r'\([ \t]*[Oo][Bb][Jj][Ee][Cc][Tt][ \t]*\)'
 t_php_STRING_CAST          = r'\([ \t]*[Ss][Tt][Rr][Ii][Nn][Gg][ \t]*\)'
-t_php_UNSET_CAST           = r'\([ \t]*[Uu][Nn][Ss][Ee][Tt][ \t]*\)'
+t_php_UNSET_CAST           = r'\([ 	]*[Uu][Nn][Ss][Ee][Tt][ 	]*\)'
+# PHP 8.5: void cast
+t_php_VOID_CAST            = r'\([ 	]*[Vv][Oo][Ii][Dd][ 	]*\)'
 
 # Comments
 

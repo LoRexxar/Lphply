@@ -1367,3 +1367,63 @@ def test_property_hook_set_with_param():
                                                   None, False)])]),
     ]
     eq_ast(input, expected)
+
+# PHP 8.5 tests
+
+def test_pipe_operator():
+    """PHP 8.5: Pipe operator |>"""
+    input = """<? $result = $x |> trim(...) |> strtolower(...);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$result'),
+                    Pipe(Pipe(Variable('$x'), FirstClassCallable('trim')),
+                         FirstClassCallable('strtolower')), False)]
+    )
+
+def test_pipe_with_closure():
+    """PHP 8.5: Pipe with arrow function"""
+    input = """<? $x |> (fn($v) => $v * 2) |> (fn($v) => $v + 1);"""
+    eq_ast(
+        input,
+        [Pipe(Pipe(Variable('$x'),
+                   ArrowFunction([FormalParameter('$v', None, False, None)],
+                                 BinaryOp('*', Variable('$v'), 2), None, False)),
+              ArrowFunction([FormalParameter('$v', None, False, None)],
+                            BinaryOp('+', Variable('$v'), 1), None, False))]
+    )
+
+def test_clone_with():
+    """PHP 8.5: clone() with properties"""
+    input = """<? $new = clone($obj, ['key' => $val]);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$new'),
+                    CloneWith(Variable('$obj'),
+                              Array([ArrayElement('key', Variable('$val'), False)])),
+                    False)]
+    )
+
+def test_clone_with_multiple():
+    """PHP 8.5: clone() with multiple properties"""
+    input = """<? $new = clone($this, ['alpha' => 128, 'red' => 255]);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$new'),
+                    CloneWith(Variable('$this'),
+                              Array([ArrayElement('alpha', 128, False),
+                                     ArrayElement('red', 255, False)])),
+                    False)]
+    )
+
+def test_void_cast():
+    """PHP 8.5: (void) cast"""
+    input = """<? (void)$x;"""
+    eq_ast(input, [VoidCast(Variable('$x'))])
+
+def test_void_cast_function_call():
+    """PHP 8.5: (void) cast on function call to discard result"""
+    input = """<? (void)getPhpVersion();"""
+    eq_ast(
+        input,
+        [VoidCast(FunctionCall('getPhpVersion', []))]
+    )
