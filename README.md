@@ -1,6 +1,11 @@
 # phply
 
-> Enhanced fork of phply — fixes core AST bugs, Supports PHP **5.6 through 8.5** syntax.
+[![PyPI version](https://img.shields.io/pypi/v/lphply.svg)](https://pypi.org/project/lphply/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/lphply.svg)](https://pypi.org/project/lphply/)
+[![GitHub release](https://img.shields.io/github/v/release/LoRexxar/Lphply.svg)](https://github.com/LoRexxar/Lphply/releases)
+[![License](https://img.shields.io/github/license/LoRexxar/Lphply.svg)](https://github.com/LoRexxar/Lphply/blob/master/LICENSE)
+
+> Enhanced fork of phply — fixes core AST bugs, supports PHP **5.6 through 8.5** syntax.
 
 ## Installation
 
@@ -8,7 +13,7 @@
 pip install lphply
 ```
 
-> > **Note:** Since the internal package name of `lphply` is still `phply`, it conflicts with the upstream `viraptor/phply` PyPI package. If you have previously installed `phply`, please uninstall it first: `pip uninstall phply && pip install lphply`.
+> **Note:** Since the internal package name of `lphply` is still `phply`, it conflicts with the upstream `viraptor/phply` PyPI package. If you have previously installed `phply`, please uninstall it first: `pip uninstall phply && pip install lphply`.
 
 ## Usage
 
