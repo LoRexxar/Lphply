@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=64.0,<77.0", "wheel", "ply"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "phply"
+version = "1.2.6"
+description = "Lexer and parser for PHP source implemented using PLY"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "BSD-3-Clause"}
+authors = [
+    { name = "Dave Benjamin", email = "dave@ramenlabs.com" },
+]
+maintainers = [
+    { name = "Stanislaw Pitucha", email = "viraptor@gmail.com" },
+]
+keywords = ["php", "parser", "lexer", "ast", "ply"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: PHP",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Parsing",
+]
+
+dependencies = [
+    "ply",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/LoRexxar/Lphply"
+Repository = "https://github.com/LoRexxar/Lphply"
+Issues = "https://github.com/LoRexxar/Lphply/issues"
+
+[project.scripts]
+phpparse = "phply.phpparse:main"
+phplex = "phply.phplex:run_on_argv1"
+
+[tool.setuptools.packages.find]
+include = ["phply*"]
+
+[tool.setuptools.package-data]
+phply = ["parsetab.py"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["parser.out"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
