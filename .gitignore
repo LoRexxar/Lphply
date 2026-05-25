@@ -14,3 +14,5 @@ build/
 dist/
 .venv/
 docs/
+parsetab.py
+parser.out

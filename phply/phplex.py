@@ -36,6 +36,10 @@ reserved = (
     'WHILE', 'FINAL', 'INTERFACE', 'IMPLEMENTS', 'PUBLIC', 'PRIVATE',
     'PROTECTED', 'ABSTRACT', 'CLONE', 'TRY', 'CATCH', 'THROW', 'NAMESPACE',
     'FINALLY', 'TRAIT', 'YIELD', 'FN',
+    # PHP 8.0
+    'MATCH', 'MIXED',
+    # PHP 8.1
+    'ENUM', 'READONLY', 'NEVER',
 )
 
 # Not used by parser
@@ -69,7 +73,7 @@ tokens = reserved + unparsed + (
     'INC', 'DEC',
 
     # Arrows
-    'OBJECT_OPERATOR', 'DOUBLE_ARROW', 'DOUBLE_COLON',
+    'OBJECT_OPERATOR', 'DOUBLE_ARROW', 'DOUBLE_COLON', 'NULLSAFE_OBJECT_OPERATOR',
 
     # Delimiters
     'LPAREN', 'RPAREN', 'LBRACKET', 'RBRACKET', 'LBRACE', 'RBRACE', 'DOLLAR',
@@ -167,6 +171,12 @@ t_php_DEC                  = r'--'
 t_php_DOUBLE_ARROW         = r'=>'
 t_php_DOUBLE_COLON         = r'::'
 
+def t_php_NULLSAFE_OBJECT_OPERATOR(t):
+    r'\?->'
+    if re.match(r'[A-Za-z_]', peek(t.lexer)):
+        t.lexer.push_state('property')
+    return t
+
 def t_php_OBJECT_OPERATOR(t):
     r'->'
     if re.match(r'[A-Za-z_]', peek(t.lexer)):
@@ -189,7 +199,7 @@ def t_php_COALESCE(t):
     return t
 
 def t_php_QUESTION(t):
-    r'\?(?![>?%])'
+    r'\?(?![>?%-])'
     return t
 
 t_php_COLON                = r':'

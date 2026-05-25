@@ -147,6 +147,19 @@ ConstantDeclaration = node('ConstantDeclaration', ['name', 'initial'])
 TraitUse = node('TraitUse', ['name', 'renames'])
 TraitModifier = node('TraitModifier', ['from', 'to', 'visibility'])
 
+# PHP 8.0
+NullsafeProperty = node('NullsafeProperty', ['node', 'name'])
+NullsafeMethodCall = node('NullsafeMethodCall', ['node', 'name', 'params'])
+NamedParameter = node('NamedParameter', ['name', 'value', 'is_ref'])
+Match = node('Match', ['expr', 'arms'])
+MatchArm = node('MatchArm', ['conditions', 'body'])
+MatchDefaultArm = node('MatchDefaultArm', ['body'])
+
+# PHP 8.1
+Enum = node('Enum', ['name', 'backing_type', 'implements', 'nodes'])
+EnumCase = node('EnumCase', ['name', 'initial'])
+FirstClassCallable = node('FirstClassCallable', ['name'])
+
 def resolve_magic_constants(nodes):
     current = {}
     def visitor(node):

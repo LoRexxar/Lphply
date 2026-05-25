@@ -26,7 +26,7 @@ precedence = (
     ('left', 'LOGICAL_AND'),
     ('right', 'PRINT'),
     ('left', 'EQUALS', 'PLUS_EQUAL', 'MINUS_EQUAL', 'MUL_EQUAL', 'DIV_EQUAL', 'CONCAT_EQUAL', 'MOD_EQUAL', 'AND_EQUAL', 'OR_EQUAL', 'XOR_EQUAL', 'SL_EQUAL', 'SR_EQUAL', 'COALESCE_EQUAL', 'POW_EQUAL'),
-    ('left', 'QUESTION', 'COLON'),
+    ('left', 'QUESTION'),
     ('left', 'BOOLEAN_OR'),
     ('right', 'COALESCE'),
     ('left', 'BOOLEAN_AND'),
@@ -44,6 +44,7 @@ precedence = (
     ('right', 'NOT', 'INC', 'DEC', 'INT_CAST', 'DOUBLE_CAST', 'STRING_CAST', 'ARRAY_CAST', 'OBJECT_CAST', 'BOOL_CAST', 'UNSET_CAST', 'AT'),
     ('right', 'LBRACKET'),
     ('nonassoc', 'NEW', 'CLONE'),
+    ('left', 'THROW'),
     # ('left', 'ELSEIF'),
     # ('left', 'ELSE'),
     ('left', 'ENDIF'),
@@ -287,10 +288,13 @@ def p_statement_try(p):
 
 def p_additional_catches(p):
     '''additional_catches : additional_catches CATCH LPAREN fully_qualified_class_name VARIABLE RPAREN LBRACE inner_statement_list RBRACE
+                          | additional_catches CATCH LPAREN fully_qualified_class_name RPAREN LBRACE inner_statement_list RBRACE
                           | empty'''
     if len(p) == 10:
         p[0] = p[1] + [ast.Catch(p[4], ast.Variable(p[5], lineno=p.lineno(5)),
                                  p[8], lineno=p.lineno(2))]
+    elif len(p) == 9:
+        p[0] = p[1] + [ast.Catch(p[4], None, p[7], lineno=p.lineno(2))]
     else:
         p[0] = []
 
@@ -305,6 +309,46 @@ def p_maybe_finally(p):
 def p_statement_throw(p):
     'statement : THROW expr SEMI'
     p[0] = ast.Throw(p[2], lineno=p.lineno(1))
+
+def p_expr_throw(p):
+    'expr : THROW expr'
+    p[0] = ast.Throw(p[2], lineno=p.lineno(1))
+
+def p_expr_match(p):
+    'expr : MATCH LPAREN expr RPAREN LBRACE match_list RBRACE'
+    p[0] = ast.Match(p[3], p[6], lineno=p.lineno(1))
+
+def p_match_list(p):
+    '''match_list : empty
+                  | non_empty_match_list possible_comma'''
+    if len(p) == 2:
+        p[0] = []
+    else:
+        p[0] = p[1]
+
+def p_non_empty_match_list(p):
+    '''non_empty_match_list : non_empty_match_list COMMA match_pair
+                            | match_pair'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
+
+def p_match_pair(p):
+    'match_pair : match_condition_list DOUBLE_ARROW expr'
+    p[0] = ast.MatchArm(p[1], p[3], lineno=p.lineno(2))
+
+def p_match_pair_default(p):
+    'match_pair : DEFAULT DOUBLE_ARROW expr'
+    p[0] = ast.MatchDefaultArm(p[3], lineno=p.lineno(1))
+
+def p_match_condition_list(p):
+    '''match_condition_list : match_condition_list COMMA expr
+                            | expr'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
 
 def p_statement_declare(p):
     'statement : DECLARE LPAREN declare_list RPAREN declare_statement'
@@ -506,18 +550,36 @@ def p_function_declaration_statement(p):
 def p_class_declaration_statement(p):
     '''class_declaration_statement : class_entry_type STRING extends_from implements_list LBRACE class_statement_list RBRACE
                                    | INTERFACE STRING interface_extends_list LBRACE class_statement_list RBRACE
-                                   | TRAIT STRING LBRACE trait_statement_list RBRACE'''
+                                   | TRAIT STRING LBRACE trait_statement_list RBRACE
+                                   | ENUM STRING optional_enum_backing_type implements_list LBRACE enum_statement_list RBRACE'''
     if len(p) == 8:
-        traits = []
-        stmts = []
-        for s in p[6]:
-            if isinstance(s, ast.TraitUse):
-                traits.append(s)
-            else:
-                stmts.append(s)
-        p[0] = ast.Class(p[2], p[1], p[3], p[4], traits, stmts, lineno=p.lineno(2))
+        if p.slice[1].type == "ENUM":
+            stmts = []
+            for s in p[6]:
+                if not isinstance(s, ast.TraitUse):
+                    stmts.append(s)
+            p[0] = ast.Enum(p[2], p[3], p[4], stmts, lineno=p.lineno(2))
+        else:
+            traits = []
+            stmts = []
+            for s in p[6]:
+                if isinstance(s, ast.TraitUse):
+                    traits.append(s)
+                else:
+                    stmts.append(s)
+            p[0] = ast.Class(p[2], p[1], p[3], p[4], traits, stmts, lineno=p.lineno(2))
     elif len(p) == 7:
-        p[0] = ast.Interface(p[2], p[3], p[5], lineno=p.lineno(1))
+        if p[1] == 'enum':
+            traits = []
+            stmts = []
+            for s in p[6]:
+                if isinstance(s, ast.TraitUse):
+                    traits.append(s)
+                else:
+                    stmts.append(s)
+            p[0] = ast.Enum(p[2], p[3], p[4], stmts, lineno=p.lineno(1))
+        else:
+            p[0] = ast.Interface(p[2], p[3], p[5], lineno=p.lineno(1))
     else:
         traits = []
         stmts = []
@@ -534,6 +596,45 @@ def p_class_entry_type(p):
                         | FINAL CLASS'''
     if len(p) == 3:
         p[0] = p[1].lower()
+
+def p_optional_enum_backing_type(p):
+    '''optional_enum_backing_type : COLON type_expr
+                                  | empty'''
+    if len(p) == 3:
+        p[0] = p[2]
+    else:
+        p[0] = None
+
+def p_enum_statement_list(p):
+    '''enum_statement_list : enum_statement_list enum_statement
+                           | empty'''
+    if len(p) == 3:
+        p[0] = p[1] + [p[2]]
+    else:
+        p[0] = []
+
+def p_enum_statement(p):
+    '''enum_statement : enum_constant SEMI
+                      | method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                      | USE fully_qualified_class_name SEMI
+                      | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE'''
+    if p.slice[1].type == 'enum_constant':
+        p[0] = p[1]
+    elif p.slice[1].type == 'USE':
+        if len(p) == 4:
+            p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
+        else:
+            p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    else:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
+
+def p_enum_constant(p):
+    '''enum_constant : CASE STRING
+                     | CASE STRING EQUALS static_expr'''
+    if len(p) == 3:
+        p[0] = ast.EnumCase(p[2], None, lineno=p.lineno(1))
+    else:
+        p[0] = ast.EnumCase(p[2], p[4], lineno=p.lineno(1))
 
 def p_extends_from(p):
     '''extends_from : empty
@@ -661,11 +762,14 @@ def p_class_variable_declaration_no_initial(p):
 
 def p_class_constant_declaration(p):
     '''class_constant_declaration : class_constant_declaration COMMA STRING EQUALS static_expr
-                                  | CONST STRING EQUALS static_expr'''
-    if len(p) == 6:
+                                  | CONST STRING EQUALS static_expr
+                                  | non_empty_member_modifiers CONST STRING EQUALS static_expr'''
+    if len(p) == 6 and p.slice[2].type == 'COMMA':
         p[0] = p[1] + [ast.ClassConstant(p[3], p[5], lineno=p.lineno(2))]
-    else:
+    elif len(p) == 5:
         p[0] = [ast.ClassConstant(p[2], p[4], lineno=p.lineno(1))]
+    else:
+        p[0] = [ast.ClassConstant(p[3], p[5], lineno=p.lineno(2))]
 
 def p_interface_list(p):
     '''interface_list : interface_list COMMA fully_qualified_class_name
@@ -723,7 +827,8 @@ def p_member_modifier(p):
     '''member_modifier : visibility_modifier
                        | STATIC
                        | ABSTRACT
-                       | FINAL'''
+                       | FINAL
+                       | READONLY'''
     p[0] = p[1].lower()
 
 def p_is_reference(p):
@@ -733,9 +838,12 @@ def p_is_reference(p):
 
 def p_parameter_list(p):
     '''parameter_list : parameter_list COMMA parameter
-                      | parameter'''
+                      | parameter
+                      | parameter_list COMMA'''
     if len(p) == 4:
         p[0] = p[1] + [p[3]]
+    elif len(p) == 3:
+        p[0] = p[1]
     else:
         p[0] = [p[1]]
 
@@ -747,9 +855,29 @@ def p_type_expr(p):
     'type_expr : fully_qualified_class_name'
     p[0] = p[1]
 
+def p_type_expr_static(p):
+    'type_expr : STATIC'
+    p[0] = p[1].lower()
+
+def p_type_expr_mixed(p):
+    'type_expr : MIXED'
+    p[0] = p[1].lower()
+
+def p_type_expr_never(p):
+    'type_expr : NEVER'
+    p[0] = p[1].lower()
+
 def p_type_expr_nullable(p):
     'type_expr : QUESTION type_expr'
     p[0] = "?" + p[2]
+
+def p_type_expr_union(p):
+    'type_expr : type_expr OR type_expr'
+    p[0] = p[1] + "|" + p[3]
+
+def p_type_expr_intersection(p):
+    'type_expr : type_expr AND type_expr'
+    p[0] = p[1] + "&" + p[3]
 
 def p_optional_return_type(p):
     '''optional_return_type : COLON type_expr
@@ -767,51 +895,70 @@ def p_optional_property_type(p):
     else:
         p[0] = None
 
+def _parse_parameter(parts, lineno):
+    """Parse parameter from a list of tokens (excluding rule name)."""
+    # parts[0] is None (rule name placeholder), actual tokens start at index 1
+    n = len(parts) - 1  # number of actual tokens
+    is_nullable = parts[1] == '?'
+    if is_nullable:
+        type_hint = "?" + parts[2]
+    else:
+        type_hint = parts[1] if n >= 2 and parts[1] not in ('&',) else None
+
+    if n == 1:  # VARIABLE
+        return ast.FormalParameter(parts[1], None, False, None, lineno=lineno)
+    elif n == 2 and parts[1] == '&':  # AND VARIABLE
+        return ast.FormalParameter(parts[2], None, True, None, lineno=lineno)
+    elif n == 2 and parts[1] != '&':  # class_name VARIABLE
+        return ast.FormalParameter(parts[2], None, False, parts[1], lineno=lineno)
+    elif n == 3 and parts[1] == '?':  # QUESTION class_name VARIABLE
+        return ast.FormalParameter(parts[3], None, False, type_hint, lineno=lineno)
+    elif n == 3 and parts[2] != '&':  # VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[1], parts[3], False, None, lineno=lineno)
+    elif n == 3 and parts[2] == '&':  # class_name AND VARIABLE
+        return ast.FormalParameter(parts[3], None, True, parts[1], lineno=lineno)
+    elif n == 4 and parts[1] == '&':  # AND VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[2], parts[4], True, None, lineno=lineno)
+    elif n == 4 and parts[1] != '&' and parts[1] != '?':  # class_name VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[2], parts[4], False, parts[1], lineno=lineno)
+    elif n == 4 and parts[1] == '?':  # QUESTION class_name AND VARIABLE
+        return ast.FormalParameter(parts[4], None, True, type_hint, lineno=lineno)
+    elif n == 5 and parts[1] == '?':  # QUESTION class_name VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[3], parts[5], False, type_hint, lineno=lineno)
+    elif n == 5 and parts[1] != '?':  # class_name AND VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[3], parts[5], True, parts[1], lineno=lineno)
+    else:  # QUESTION class_name AND VARIABLE EQUALS static_scalar (n=6)
+        return ast.FormalParameter(parts[4], parts[6], True, type_hint, lineno=lineno)
+
 def p_parameter(p):
     '''parameter : VARIABLE
-                 | class_name VARIABLE
+                 | type_expr VARIABLE
                  | AND VARIABLE
-                 | class_name AND VARIABLE
+                 | type_expr AND VARIABLE
                  | VARIABLE EQUALS static_scalar
-                 | class_name VARIABLE EQUALS static_scalar
+                 | type_expr VARIABLE EQUALS static_scalar
                  | AND VARIABLE EQUALS static_scalar
-                 | class_name AND VARIABLE EQUALS static_scalar
-                 | QUESTION class_name VARIABLE
-                 | QUESTION class_name AND VARIABLE
-                 | QUESTION class_name VARIABLE EQUALS static_scalar
-                 | QUESTION class_name AND VARIABLE EQUALS static_scalar'''
-    is_nullable = p[1] == '?'
-    if is_nullable:
-        offset = 1
-        type_hint = "?" + p[2]
-    else:
-        offset = 0
-        type_hint = p[1] if len(p) >= 2 and p[1] not in ('&',) else None
+                 | type_expr AND VARIABLE EQUALS static_scalar
+                 | QUESTION type_expr VARIABLE
+                 | QUESTION type_expr AND VARIABLE
+                 | QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+    p[0] = _parse_parameter(list(p), p.lineno(1))
 
-    if len(p) == 2: # VARIABLE
-        p[0] = ast.FormalParameter(p[1], None, False, None, lineno=p.lineno(1))
-    elif len(p) == 3 and p[1] == '&': # AND VARIABLE
-        p[0] = ast.FormalParameter(p[2], None, True, None, lineno=p.lineno(1))
-    elif len(p) == 3 and p[1] != '&': # class_name VARIABLE
-        p[0] = ast.FormalParameter(p[2], None, False, p[1], lineno=p.lineno(1))
-    elif len(p) == 4 and p[1] == '?': # QUESTION class_name VARIABLE
-        p[0] = ast.FormalParameter(p[3], None, False, type_hint, lineno=p.lineno(1))
-    elif len(p) == 4 and p[2] != '&': # VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[1], p[3], False, None, lineno=p.lineno(1))
-    elif len(p) == 4 and p[2] == '&': # class_name AND VARIABLE
-        p[0] = ast.FormalParameter(p[3], None, True, p[1], lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] == '&': # AND VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[2], p[4], True, None, lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] != '&' and p[1] != '?': # class_name VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[2], p[4], False, p[1], lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] == '?': # QUESTION class_name AND VARIABLE
-        p[0] = ast.FormalParameter(p[4], None, True, type_hint, lineno=p.lineno(1))
-    elif len(p) == 6 and p[1] == '?': # QUESTION class_name VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[3], p[5], False, type_hint, lineno=p.lineno(1))
-    elif len(p) == 6 and p[1] != '?': # class_name AND VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[3], p[5], True, p[1], lineno=p.lineno(1))
-    else: # QUESTION class_name AND VARIABLE EQUALS static_scalar (len=7)
-        p[0] = ast.FormalParameter(p[4], p[6], True, type_hint, lineno=p.lineno(1))
+def p_parameter_promoted(p):
+    '''parameter : visibility_modifier VARIABLE
+                 | visibility_modifier type_expr VARIABLE
+                 | visibility_modifier type_expr AND VARIABLE
+                 | visibility_modifier VARIABLE EQUALS static_scalar
+                 | visibility_modifier type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier QUESTION type_expr VARIABLE
+                 | visibility_modifier QUESTION type_expr AND VARIABLE
+                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+    # Strip visibility modifier and parse the rest as a normal parameter
+    shifted = [None] + list(p)[2:]
+    p[0] = _parse_parameter(shifted, p.lineno(1))
 
 def p_expr_variable(p):
     'expr : variable'
@@ -838,6 +985,16 @@ def p_expr_objectop(p):
         p[0] = ast.MethodCall(p[1], name, params, lineno=p.lineno(3))
     else:
         p[0] = ast.ObjectProperty(p[1], name, lineno=p.lineno(3))
+
+def p_expr_nullsafe_objectop(p):
+    'expr : expr NULLSAFE_OBJECT_OPERATOR object_property method_or_not'
+    name, _dims = p[3]
+    assert _dims == []
+    params = p[4]
+    if params is not None:
+        p[0] = ast.NullsafeMethodCall(p[1], name, params, lineno=p.lineno(3))
+    else:
+        p[0] = ast.NullsafeProperty(p[1], name, lineno=p.lineno(3))
 
 def p_class_name_reference(p):
     '''class_name_reference : class_name
@@ -976,6 +1133,20 @@ def p_function_call_variable(p):
 def p_function_call_backtick_shell_exec(p):
     'function_call : BACKTICK encaps_list BACKTICK'
     p[0] = ast.FunctionCall('shell_exec', [ast.Parameter(p[2], False)], lineno=p.lineno(1))
+
+def p_function_call_first_class_callable(p):
+    '''function_call : namespace_name LPAREN ELLIPSIS RPAREN
+                     | NS_SEPARATOR namespace_name LPAREN ELLIPSIS RPAREN'''
+    if len(p) == 5:
+        p[0] = ast.FirstClassCallable(p[1], lineno=p.lineno(1))
+    else:
+        p[0] = ast.FirstClassCallable(p[1] + p[2], lineno=p.lineno(1))
+
+def p_function_call_first_class_callable_static(p):
+    '''function_call : class_name DOUBLE_COLON STRING LPAREN ELLIPSIS RPAREN
+                     | variable_class_name DOUBLE_COLON STRING LPAREN ELLIPSIS RPAREN'''
+    p[0] = ast.FirstClassCallable(ast.StaticProperty(p[1], p[3], lineno=p.lineno(2)),
+                                  lineno=p.lineno(1))
 
 def p_method_or_not(p):
     '''method_or_not : LPAREN function_call_parameter_list RPAREN
@@ -1162,6 +1333,16 @@ def p_function_call_parameter(p):
     else:
         p[0] = ast.Parameter(p[2], True, lineno=p.lineno(1))
 
+def p_function_call_parameter_named(p):
+    '''function_call_parameter : STRING COLON expr
+                               | ARRAY COLON expr'''
+    p[0] = ast.NamedParameter(p[1], p[3], False, lineno=p.lineno(1))
+
+def p_function_call_parameter_named_ref(p):
+    '''function_call_parameter : STRING COLON AND variable
+                               | ARRAY COLON AND variable'''
+    p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
+
 def p_expr_function(p):
     'expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE'
     p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
@@ -1252,11 +1433,11 @@ def p_expr_unary_op(p):
     p[0] = ast.UnaryOp(p[1], p[2], lineno=p.lineno(1))
 
 def p_expr_ternary_op(p):
-    'expr : expr QUESTION expr COLON expr'
+    'expr : expr QUESTION expr COLON expr %prec QUESTION'
     p[0] = ast.TernaryOp(p[1], p[3], p[5], lineno=p.lineno(2))
 
 def p_expr_short_ternary_op(p):
-    'expr : expr QUESTION COLON expr'
+    'expr : expr QUESTION COLON expr %prec QUESTION'
     p[0] = ast.TernaryOp(p[1], p[1], p[4], lineno=p.lineno(2))
 
 def p_expr_pre_incdec(p):

@@ -1000,3 +1000,175 @@ def test_exit_loc():
         Exit(1, 'exit', lineno=2)
     ]
     eq_ast(input, expected, with_top_lineno=True)
+
+# PHP 8.0 tests
+
+def test_nullsafe_property():
+    input = '''<? $x?->a; '''
+    expected = [
+        NullsafeProperty(Variable('$x'), 'a'),
+    ]
+    eq_ast(input, expected)
+
+def test_nullsafe_method_call():
+    input = '''<? $x?->a(); '''
+    expected = [
+        NullsafeMethodCall(Variable('$x'), 'a', []),
+    ]
+    eq_ast(input, expected)
+
+def test_nullsafe_chain():
+    input = '''<? $x?->a()->b; '''
+    expected = [
+        ObjectProperty(NullsafeMethodCall(Variable('$x'), 'a', []), 'b'),
+    ]
+    eq_ast(input, expected)
+
+def test_named_arguments():
+    input = '''<? array_map(callback: $fn, array: $arr); '''
+    expected = [
+        FunctionCall('array_map', [
+            NamedParameter('callback', Variable('$fn'), False),
+            NamedParameter('array', Variable('$arr'), False),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_match_expression():
+    input = '''<? match($x) { 1 => 'a', 2, 3 => 'b', default => 'c' }; '''
+    expected = [
+        Match(Variable('$x'), [
+            MatchArm([1], 'a'),
+            MatchArm([2, 3], 'b'),
+            MatchDefaultArm('c'),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_union_types():
+    input = '''<? function f(int|string $x): int|bool {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, 'int|string')], [],
+                 False, return_type='int|bool'),
+    ]
+    eq_ast(input, expected)
+
+def test_nullable_union_type():
+    input = '''<? function f(?int|string $x): ?A|B {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, '?int|string')], [],
+                 False, return_type='?A|B'),
+    ]
+    eq_ast(input, expected)
+
+def test_constructor_promotion():
+    input = '''<? class A { public function __construct(public int $x, private string $y = 'a') {} } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [Method('__construct', ['public'],
+                      [FormalParameter('$x', None, False, 'int'),
+                       FormalParameter('$y', 'a', False, 'string')],
+                      [], False)]),
+    ]
+    eq_ast(input, expected)
+
+def test_static_return_type():
+    input = '''<? function f(): static {} '''
+    expected = [
+        Function('f', [], [], False, return_type='static'),
+    ]
+    eq_ast(input, expected)
+
+def test_mixed_type():
+    input = '''<? function f(): mixed {} '''
+    expected = [
+        Function('f', [], [], False, return_type='mixed'),
+    ]
+    eq_ast(input, expected)
+
+def test_throw_expression():
+    input = '''<? $x ?? throw new Exception(); '''
+    expected = [
+        BinaryOp('??', Variable('$x'),
+                 Throw(New('Exception', []), lineno=1), lineno=1),
+    ]
+    eq_ast(input, expected)
+
+def test_non_capturing_catch():
+    input = '''<? try {} catch (Exception) {} '''
+    expected = [
+        Try([], [
+            Catch('Exception', None, []),
+        ], None),
+    ]
+    eq_ast(input, expected)
+
+def test_trailing_comma_params():
+    input = '''<? function f($a, $b,) {} '''
+    expected = [
+        Function('f', [FormalParameter('$a', None, False, None),
+                       FormalParameter('$b', None, False, None)], [], False),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.1 tests
+
+def test_enum_basic():
+    input = '''<? enum Status: string { case Active = 'active'; case Inactive = 'inactive'; } '''
+    expected = [
+        Enum('Status', 'string', [], [
+            EnumCase('Active', 'active'),
+            EnumCase('Inactive', 'inactive'),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_enum_without_backing():
+    input = '''<? enum Color { case Red; case Blue; } '''
+    expected = [
+        Enum('Color', None, [], [
+            EnumCase('Red', None),
+            EnumCase('Blue', None),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_readonly_property():
+    input = '''<? class A { public readonly int $x; } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [ClassVariables(['public', 'readonly'],
+                              [ClassVariable('$x', None)],
+                              property_type='int')]),
+    ]
+    eq_ast(input, expected)
+
+def test_never_return_type():
+    input = '''<? function f(): never { die(); } '''
+    expected = [
+        Function('f', [], [Exit(None, 'die')], False, return_type='never'),
+    ]
+    eq_ast(input, expected)
+
+def test_first_class_callable():
+    input = '''<? $f = strlen(...); '''
+    expected = [
+        Assignment(Variable('$f'), FirstClassCallable('strlen'), False),
+    ]
+    eq_ast(input, expected)
+
+def test_intersection_types():
+    input = '''<? function f(Countable&Iterator $x) {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, 'Countable&Iterator')], [],
+                 False),
+    ]
+    eq_ast(input, expected)
+
+def test_final_class_constant():
+    input = '''<? class A { final const X = 1; } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [ClassConstants([ClassConstant('X', 1)])]),
+    ]
+    eq_ast(input, expected)
