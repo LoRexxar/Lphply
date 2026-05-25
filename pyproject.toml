@@ -32,7 +32,6 @@ classifiers = [
     "Programming Language :: PHP",
     "Topic :: Software Development :: Libraries",
     "Topic :: Software Development :: Compilers",
-    "Topic :: Software Development :: Parsing",
 ]
 
 dependencies = [
