@@ -2,6 +2,7 @@
 # phplex.py
 #
 # A lexer for PHP.
+# PHP 7.0-7.4 lexer support added
 # ----------------------------------------------------------------------
 
 import ply.lex as lex
@@ -34,7 +35,11 @@ reserved = (
     'REQUIRE_ONCE', 'RETURN', 'STATIC', 'SWITCH', 'UNSET', 'USE', 'VAR',
     'WHILE', 'FINAL', 'INTERFACE', 'IMPLEMENTS', 'PUBLIC', 'PRIVATE',
     'PROTECTED', 'ABSTRACT', 'CLONE', 'TRY', 'CATCH', 'THROW', 'NAMESPACE',
-    'FINALLY', 'TRAIT', 'YIELD',
+    'FINALLY', 'TRAIT', 'YIELD', 'FN',
+    # PHP 8.0
+    'MATCH', 'MIXED',
+    # PHP 8.1
+    'ENUM', 'READONLY', 'NEVER',
 )
 
 # Not used by parser
@@ -56,24 +61,32 @@ tokens = reserved + unparsed + (
     'IS_GREATER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER_OR_EQUAL', 'IS_EQUAL',
     'IS_NOT_EQUAL', 'IS_IDENTICAL', 'IS_NOT_IDENTICAL',
 
+    # PHP 7.0+ operators
+    'COALESCE', 'SPACESHIP',
+
     # Assignment operators
     'EQUALS', 'MUL_EQUAL', 'DIV_EQUAL', 'MOD_EQUAL', 'PLUS_EQUAL',
     'MINUS_EQUAL', 'SL_EQUAL', 'SR_EQUAL', 'AND_EQUAL', 'OR_EQUAL',
-    'XOR_EQUAL', 'CONCAT_EQUAL',
+    'XOR_EQUAL', 'CONCAT_EQUAL', 'COALESCE_EQUAL', 'POW', 'POW_EQUAL',
 
     # Increment/decrement
     'INC', 'DEC',
 
     # Arrows
-    'OBJECT_OPERATOR', 'DOUBLE_ARROW', 'DOUBLE_COLON',
+    'OBJECT_OPERATOR', 'DOUBLE_ARROW', 'DOUBLE_COLON', 'NULLSAFE_OBJECT_OPERATOR',
 
     # Delimiters
     'LPAREN', 'RPAREN', 'LBRACKET', 'RBRACKET', 'LBRACE', 'RBRACE', 'DOLLAR',
-    'COMMA', 'CONCAT', 'QUESTION', 'COLON', 'SEMI', 'AT', 'NS_SEPARATOR',
+    'COMMA', 'CONCAT', 'ELLIPSIS', 'QUESTION', 'COLON', 'SEMI', 'AT', 'NS_SEPARATOR',
+
+    # PHP 8.5: Pipe operator
+    'PIPE',
 
     # Casts
     'ARRAY_CAST', 'BINARY_CAST', 'BOOL_CAST', 'DOUBLE_CAST', 'INT_CAST',
     'OBJECT_CAST', 'STRING_CAST', 'UNSET_CAST',
+    # PHP 8.5: void cast
+    'VOID_CAST',
 
     # Escaping from HTML
     'INLINE_HTML',
@@ -106,10 +119,25 @@ def t_php_WHITESPACE(t):
 # Operators
 t_php_PLUS                = r'\+'
 t_php_MINUS               = r'-'
+
+def t_php_POW_EQUAL(t):
+    r'\*\*='
+    return t
+
+def t_php_POW(t):
+    r'\*\*'
+    return t
+
 t_php_MUL                 = r'\*'
 t_php_DIV                 = r'/'
 t_php_MOD                 = r'%'
 t_php_AND                 = r'&'
+
+# PHP 8.5: Pipe operator |> must match before OR |
+def t_php_PIPE(t):
+    r'\|>'
+    return t
+
 t_php_OR                  = r'\|'
 t_php_NOT                 = r'~'
 t_php_XOR                 = r'\^'
@@ -126,6 +154,7 @@ t_php_IS_EQUAL            = r'=='
 t_php_IS_NOT_EQUAL        = r'(!=(?!=))|(<>)'
 t_php_IS_IDENTICAL        = r'==='
 t_php_IS_NOT_IDENTICAL    = r'!=='
+t_php_SPACESHIP           = r'<=>'
 
 # Assignment operators
 t_php_EQUALS               = r'='
@@ -141,6 +170,10 @@ t_php_OR_EQUAL             = r'\|='
 t_php_XOR_EQUAL            = r'\^='
 t_php_CONCAT_EQUAL         = r'\.='
 
+def t_php_COALESCE_EQUAL(t):
+    r'\?\?='
+    return t
+
 # Increment/decrement
 t_php_INC                  = r'\+\+'
 t_php_DEC                  = r'--'
@@ -148,6 +181,12 @@ t_php_DEC                  = r'--'
 # Arrows
 t_php_DOUBLE_ARROW         = r'=>'
 t_php_DOUBLE_COLON         = r'::'
+
+def t_php_NULLSAFE_OBJECT_OPERATOR(t):
+    r'\?->'
+    if re.match(r'[A-Za-z_]', peek(t.lexer)):
+        t.lexer.push_state('property')
+    return t
 
 def t_php_OBJECT_OPERATOR(t):
     r'->'
@@ -161,7 +200,19 @@ t_php_RPAREN               = r'\)'
 t_php_DOLLAR               = r'\$'
 t_php_COMMA                = r','
 t_php_CONCAT               = r'\.(?!\d|=)'
-t_php_QUESTION             = r'\?'
+
+def t_php_ELLIPSIS(t):
+    r'\.\.\.'
+    return t
+
+def t_php_COALESCE(t):
+    r'\?\?'
+    return t
+
+def t_php_QUESTION(t):
+    r'\?(?![>?%-])'
+    return t
+
 t_php_COLON                = r':'
 t_php_SEMI                 = r';'
 t_php_AT                   = r'@'
@@ -195,7 +246,9 @@ t_php_DOUBLE_CAST          = r'\([ \t]*([Rr][Ee][Aa][Ll]|[Dd][Oo][Uu][Bb][Ll][Ee
 t_php_INT_CAST             = r'\([ \t]*[Ii][Nn][Tt]([Ee][Gg][Ee][Rr])?[ \t]*\)'
 t_php_OBJECT_CAST          = r'\([ \t]*[Oo][Bb][Jj][Ee][Cc][Tt][ \t]*\)'
 t_php_STRING_CAST          = r'\([ \t]*[Ss][Tt][Rr][Ii][Nn][Gg][ \t]*\)'
-t_php_UNSET_CAST           = r'\([ \t]*[Uu][Nn][Ss][Ee][Tt][ \t]*\)'
+t_php_UNSET_CAST           = r'\([ 	]*[Uu][Nn][Ss][Ee][Tt][ 	]*\)'
+# PHP 8.5: void cast
+t_php_VOID_CAST            = r'\([ 	]*[Vv][Oo][Ii][Dd][ 	]*\)'
 
 # Comments
 
@@ -268,7 +321,7 @@ def t_php_DNUMBER(t):
 
 # Integer literal
 def t_php_LNUMBER(t):
-    r'(0b[01]+)|(0x[0-9A-Fa-f]+)|\d+'
+    r'(0[bB][01]+)|(0[xX][0-9A-Fa-f]+)|\d+'
     return t
 
 # String literal

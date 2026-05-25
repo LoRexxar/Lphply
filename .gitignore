@@ -1,15 +1,32 @@
+# Byte-compiled / optimized
+__pycache__/
 *.pyc
-parser.out
-parsetab.py
-phply.egg-info
-.eggs
-Lib/
-Scripts/
-pyvenv.cfg
-pip-selfcheck.json
-man/
-*.sw?
-.tox
-build/
+*.pyo
+
+# Distribution / packaging
+*.egg-info/
+*.egg
+.eggs/
 dist/
+build/
+
+# Testing
+.pytest_cache/
+.tox/
+
+# Generated parser files
+phply/parser.out
+phply/parsetab.py
+
+# Virtual environments
 .venv/
+venv/
+
+# Compiled extensions
+*.so
+
+# Editor artifacts
+*.sw?
+
+# Docs build
+docs/

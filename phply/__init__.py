@@ -1,1 +1,2 @@
-__import__('pkg_resources').declare_namespace(__name__)
+# phply package
+__version__ = '2.0.0'

@@ -1,67 +1,69 @@
 # phply
 
-phply is a parser for the PHP programming language written using PLY, a
-Lex/YACC-style parser generator toolkit for Python.
+> Enhanced fork of phply — fixes core AST bugs, Supports PHP **5.6 through 8.5** syntax.
 
-## Why?
+## Installation
 
-Good question. Because I'm crazy. Because it seemed possible.
+```bash
+pip install lphply
+```
 
-Things I'm interested in doing with it:
+> > **Note:** Since the internal package name of `lphply` is still `phply`, it conflicts with the upstream `viraptor/phply` PyPI package. If you have previously installed `phply`, please uninstall it first: `pip uninstall phply && pip install lphply`.
 
-* Converting PHP code to Python
-* Running PHP templates in a Python environment
-* Learning more about parsing "industrial" languages, warts and all
+## Usage
 
-## What does it stand for?
+### Lexer
 
-* phply -> PHP PLY
-* phply -> PHP Hypertext Preprocessor Python Lex YACC
-* phply -> PHP Hypertext Preprocessor Hypertext Preprocessor Python Lex Yet Another Compiler Compiler
-* (... to be completed ...)
+```python
+from phply.phplex import lexer
 
-## How do you pronounce it?
+lexer.input('<?php echo "Hello, World!"; ?>')
+for token in lexer:
+    print(token)
+```
 
-If you're conservative, it's pronounced "pee aich ply". If you're liberal,
-it's "fiply". And if you're anarchist, pronounce it however you want. Who am I
-to tell you what to do?
+### Parser
 
-## What's working?
+```python
+from phply.phplex import lexer
+from phply.phpparse import make_parser
 
-* Lexer matching the standard PHP lexer token-for-token
-* Parser and abstract syntax tree for most of the PHP grammar
-* Script to convert PHP source to JSON-based ASTs
-* Script to convert PHP source to Jinja2 source (experimental)
+parser = make_parser()
+with open('example.php', 'r') as f:
+    code = f.read()
+result = parser.parse(code, lexer=lexer)
+```
 
-## What's not?
+### Command-line tools
 
-Some things can't be parsed yet. They are getting fewer by the day, but there
-is still a fair amount of work to do:
+```bash
+# Parse a PHP file
+phpparse file.php
 
-* Labels and goto
-* Some other stuff, probably
+# Lex a PHP file
+phplex file.php
+```
 
-## Who's working on it?
+## Development
 
-See the [AUTHORS](https://github.com/viraptor/phply/blob/master/AUTHORS) file.
+Clone the repository and install in development mode:
 
-## Troubleshooting
+```bash
+git clone https://github.com/LoRexxar/Lphply.git
+cd Lphply
+pip install -e ".[test]"
+```
 
-### Couldn't create 'phply.parsetab'
+### Running tests
 
-Phply relies on `ply` to generate and cache some tables required for the parser.
-These have been generated with the latest available version of ply for the phply
-release. If you installed phply under a different user and a new `ply` was
-released, the parsetab file cannot be automatically updated. Your options are
-to:
+```bash
+pytest
+```
 
-* raise an issue for phply
-* rebuild the package yourself
+## License
 
-## How do I use it?
+BSD-3-Clause. See [LICENSE](LICENSE) for details.
 
-* Lexer test: python phply/phplex.py
-* Parser test: python phply/phpparse.py
-* JSON dump: cd tools; python php2json.py < input.php > output.json
-* Jinja2 conversion: cd tools; python php2jinja.py < input.php > output.html
-* Fork me on GitHub and start hacking :)
+## Credits
+
+Fork of [viraptor/phply](https://github.com/viraptor/phply), originally by Dave Benjamin.

@@ -1,67 +1,25 @@
-# coding: utf-8
-from __future__ import unicode_literals
-
-from setuptools import setup, find_packages, Command
-from distutils.command.build import build as distutils_build
-
-distutils_build.sub_commands.insert(0, ('gen_parsetab', lambda _: True))
+import os
+import sys
+from setuptools import setup
+from setuptools.command.build_py import build_py
 
 
-class GenerateParsetab(Command):
-    user_options = []
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
+class BuildPyCommand(build_py):
+    """Generate parsetab.py during build by importing phpparse directly."""
 
     def run(self):
+        # Add the source tree to sys.path so we can import phply.phpparse
+        # even in an isolated build environment
+        src_dir = os.path.abspath(os.path.dirname(__file__))
+        if src_dir not in sys.path:
+            sys.path.insert(0, src_dir)
         from phply.phpparse import make_parser
         make_parser(debug=False)
+        super().run()
 
 
-setup(name="phply",
-      version="1.2.6",
-      packages=find_packages(),
-      namespace_packages=['phply'],
-      include_package_data=True,
-      author='Ramen',
-      author_email='',
-      maintainer='Stanisław Pitucha',
-      maintainer_email='viraptor@gmail.com',
-      description='Lexer and parser for PHP source implemented using PLY',
-      zip_safe=False,
-      platforms='any',
-      license='BSD',
-      url='https://github.com/viraptor/phply',
-
-      classifiers=[
-        'Development Status :: 5 - Production/Stable',
-        'Environment :: Console',
-        'Intended Audience :: Education',
-        'License :: OSI Approved :: BSD License',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: PHP',
-        'Operating System :: Unix',
-        ],
-
-      entry_points={
-        'console_scripts': [
-            'phpparse=phply.phpparse:main',
-            'phplex=phply.phplex:run_on_argv1',
-            ],
-        },
-
-      install_requires=[
-        'ply',
-        ],
-      setup_requires=[
-        'ply',
-        ],
-      extras_require={'test': ['pytest', 'tox']},
-
-      cmdclass={
-          'gen_parsetab': GenerateParsetab,
-          }
-      )
+setup(
+    cmdclass={
+        'build_py': BuildPyCommand,
+    },
+)

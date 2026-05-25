@@ -8,15 +8,21 @@ class Node(object):
     fields = []
 
     def __init__(self, *args, **kwargs):
-        assert len(self.fields) == len(args), \
-            '%s takes %d arguments' % (self.__class__.__name__,
-                                       len(self.fields))
         try:
             self.lineno = kwargs['lineno']
         except KeyError:
             self.lineno = None
+        try:
+            self.end_lineno = kwargs['end_lineno']
+        except KeyError:
+            self.end_lineno = None
         for i, field in enumerate(self.fields):
-            setattr(self, field, args[i])
+            if i < len(args):
+                setattr(self, field, args[i])
+            elif field in kwargs:
+                setattr(self, field, kwargs[field])
+            else:
+                setattr(self, field, None)
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__,
@@ -46,6 +52,7 @@ class Node(object):
         values = {}
         if with_lineno:
             values['lineno'] = self.lineno
+            values['end_lineno'] = self.end_lineno
         for field in self.fields:
             value = getattr(self, field)
             if hasattr(value, 'generic'):
@@ -70,6 +77,8 @@ Assignment = node('Assignment', ['node', 'expr', 'is_ref'])
 ListAssignment = node('ListAssignment', ['nodes', 'expr'])
 New = node('New', ['name', 'params'])
 Clone = node('Clone', ['node'])
+# PHP 8.5: Clone With
+CloneWith = node('CloneWith', ['node', 'properties'])
 Break = node('Break', ['node'])
 Continue = node('Continue', ['node'])
 Return = node('Return', ['node'])
@@ -85,15 +94,21 @@ Finally = node('Finally', ['nodes'])
 Throw = node('Throw', ['node'])
 Declare = node('Declare', ['directives', 'node'])
 Directive = node('Directive', ['name', 'node'])
-Function = node('Function', ['name', 'params', 'nodes', 'is_ref'])
-Method = node('Method', ['name', 'modifiers', 'params', 'nodes', 'is_ref'])
+Function = node('Function', ['name', 'params', 'nodes', 'is_ref', 'return_type'])
+Method = node('Method', ['name', 'modifiers', 'params', 'nodes', 'is_ref', 'return_type'])
 Closure = node('Closure', ['params', 'vars', 'nodes', 'is_ref'])
+ArrowFunction = node('ArrowFunction', ['params', 'expr', 'return_type', 'is_reference'])
 Class = node('Class', ['name', 'type', 'extends', 'implements', 'traits', 'nodes'])
 Trait = node('Trait', ['name', 'traits', 'nodes'])
 ClassConstants = node('ClassConstants', ['nodes'])
-ClassConstant = node('ClassConstant', ['name', 'initial'])
-ClassVariables = node('ClassVariables', ['modifiers', 'nodes'])
+ClassConstant = node('ClassConstant', ['name', 'initial', 'const_type'])
+ClassVariables = node('ClassVariables', ['modifiers', 'nodes', 'property_type', 'hooks'])
 ClassVariable = node('ClassVariable', ['name', 'initial'])
+# PHP 8.4: Property Hooks
+PropertyHook = node('PropertyHook', ['name', 'params', 'body', 'modifiers', 'short'])
+# name: 'get' or 'set', params: list of FormalParameter (for set hooks) or None,
+# body: list of statements or single expression, modifiers: list of visibility modifiers or None,
+# short: True for arrow form (get => expr), False for body form (get { stmts })
 Interface = node('Interface', ['name', 'extends', 'nodes'])
 AssignOp = node('AssignOp', ['op', 'left', 'right'])
 BinaryOp = node('BinaryOp', ['op', 'left', 'right'])
@@ -102,6 +117,10 @@ TernaryOp = node('TernaryOp', ['expr', 'iftrue', 'iffalse'])
 PreIncDecOp = node('PreIncDecOp', ['op', 'expr'])
 PostIncDecOp = node('PostIncDecOp', ['op', 'expr'])
 Cast = node('Cast', ['type', 'expr'])
+# PHP 8.5: Pipe operator
+Pipe = node('Pipe', ['left', 'right'])
+# PHP 8.5: void cast
+VoidCast = node('VoidCast', ['expr'])
 IsSet = node('IsSet', ['nodes'])
 Empty = node('Empty', ['expr'])
 Eval = node('Eval', ['expr'])
@@ -143,6 +162,19 @@ ConstantDeclarations = node('ConstantDeclarations', ['nodes'])
 ConstantDeclaration = node('ConstantDeclaration', ['name', 'initial'])
 TraitUse = node('TraitUse', ['name', 'renames'])
 TraitModifier = node('TraitModifier', ['from', 'to', 'visibility'])
+
+# PHP 8.0
+NullsafeProperty = node('NullsafeProperty', ['node', 'name'])
+NullsafeMethodCall = node('NullsafeMethodCall', ['node', 'name', 'params'])
+NamedParameter = node('NamedParameter', ['name', 'value', 'is_ref'])
+Match = node('Match', ['expr', 'arms'])
+MatchArm = node('MatchArm', ['conditions', 'body'])
+MatchDefaultArm = node('MatchDefaultArm', ['body'])
+
+# PHP 8.1
+Enum = node('Enum', ['name', 'backing_type', 'implements', 'nodes'])
+EnumCase = node('EnumCase', ['name', 'initial'])
+FirstClassCallable = node('FirstClassCallable', ['name'])
 
 def resolve_magic_constants(nodes):
     current = {}

@@ -1000,3 +1000,524 @@ def test_exit_loc():
         Exit(1, 'exit', lineno=2)
     ]
     eq_ast(input, expected, with_top_lineno=True)
+
+# PHP 8.0 tests
+
+def test_nullsafe_property():
+    input = '''<? $x?->a; '''
+    expected = [
+        NullsafeProperty(Variable('$x'), 'a'),
+    ]
+    eq_ast(input, expected)
+
+def test_nullsafe_method_call():
+    input = '''<? $x?->a(); '''
+    expected = [
+        NullsafeMethodCall(Variable('$x'), 'a', []),
+    ]
+    eq_ast(input, expected)
+
+def test_nullsafe_chain():
+    input = '''<? $x?->a()->b; '''
+    expected = [
+        ObjectProperty(NullsafeMethodCall(Variable('$x'), 'a', []), 'b'),
+    ]
+    eq_ast(input, expected)
+
+def test_named_arguments():
+    input = '''<? array_map(callback: $fn, array: $arr); '''
+    expected = [
+        FunctionCall('array_map', [
+            NamedParameter('callback', Variable('$fn'), False),
+            NamedParameter('array', Variable('$arr'), False),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_match_expression():
+    input = '''<? match($x) { 1 => 'a', 2, 3 => 'b', default => 'c' }; '''
+    expected = [
+        Match(Variable('$x'), [
+            MatchArm([1], 'a'),
+            MatchArm([2, 3], 'b'),
+            MatchDefaultArm('c'),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_union_types():
+    input = '''<? function f(int|string $x): int|bool {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, 'int|string')], [],
+                 False, return_type='int|bool'),
+    ]
+    eq_ast(input, expected)
+
+def test_nullable_union_type():
+    input = '''<? function f(?int|string $x): ?A|B {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, '?int|string')], [],
+                 False, return_type='?A|B'),
+    ]
+    eq_ast(input, expected)
+
+def test_constructor_promotion():
+    input = '''<? class A { public function __construct(public int $x, private string $y = 'a') {} } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [Method('__construct', ['public'],
+                      [FormalParameter('$x', None, False, 'int'),
+                       FormalParameter('$y', 'a', False, 'string')],
+                      [], False)]),
+    ]
+    eq_ast(input, expected)
+
+def test_static_return_type():
+    input = '''<? function f(): static {} '''
+    expected = [
+        Function('f', [], [], False, return_type='static'),
+    ]
+    eq_ast(input, expected)
+
+def test_mixed_type():
+    input = '''<? function f(): mixed {} '''
+    expected = [
+        Function('f', [], [], False, return_type='mixed'),
+    ]
+    eq_ast(input, expected)
+
+def test_throw_expression():
+    input = '''<? $x ?? throw new Exception(); '''
+    expected = [
+        BinaryOp('??', Variable('$x'),
+                 Throw(New('Exception', []), lineno=1), lineno=1),
+    ]
+    eq_ast(input, expected)
+
+def test_non_capturing_catch():
+    input = '''<? try {} catch (Exception) {} '''
+    expected = [
+        Try([], [
+            Catch('Exception', None, []),
+        ], None),
+    ]
+    eq_ast(input, expected)
+
+def test_trailing_comma_params():
+    input = '''<? function f($a, $b,) {} '''
+    expected = [
+        Function('f', [FormalParameter('$a', None, False, None),
+                       FormalParameter('$b', None, False, None)], [], False),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.1 tests
+
+def test_enum_basic():
+    input = '''<? enum Status: string { case Active = 'active'; case Inactive = 'inactive'; } '''
+    expected = [
+        Enum('Status', 'string', [], [
+            EnumCase('Active', 'active'),
+            EnumCase('Inactive', 'inactive'),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_enum_without_backing():
+    input = '''<? enum Color { case Red; case Blue; } '''
+    expected = [
+        Enum('Color', None, [], [
+            EnumCase('Red', None),
+            EnumCase('Blue', None),
+        ]),
+    ]
+    eq_ast(input, expected)
+
+def test_readonly_property():
+    input = '''<? class A { public readonly int $x; } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [ClassVariables(['public', 'readonly'],
+                              [ClassVariable('$x', None)],
+                              property_type='int')]),
+    ]
+    eq_ast(input, expected)
+
+def test_never_return_type():
+    input = '''<? function f(): never { die(); } '''
+    expected = [
+        Function('f', [], [Exit(None, 'die')], False, return_type='never'),
+    ]
+    eq_ast(input, expected)
+
+def test_first_class_callable():
+    input = '''<? $f = strlen(...); '''
+    expected = [
+        Assignment(Variable('$f'), FirstClassCallable('strlen'), False),
+    ]
+    eq_ast(input, expected)
+
+def test_intersection_types():
+    input = '''<? function f(Countable&Iterator $x) {} '''
+    expected = [
+        Function('f', [FormalParameter('$x', None, False, 'Countable&Iterator')], [],
+                 False),
+    ]
+    eq_ast(input, expected)
+
+def test_final_class_constant():
+    input = '''<? class A { final const X = 1; } '''
+    expected = [
+        Class('A', None, None, [], [],
+              [ClassConstants([ClassConstant('X', 1)])]),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.2 tests
+
+def test_readonly_class():
+    input = '''<? readonly class Foo { public int $x = 1; } '''
+    expected = [
+        Class('Foo', 'readonly', None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$x', 1)], property_type='int')]),
+    ]
+    eq_ast(input, expected)
+
+def test_trait_constants():
+    input = '''<? trait Foo { public const BAR = 'baz'; } '''
+    expected = [
+        Trait('Foo', [], [ClassConstants([ClassConstant('BAR', 'baz')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_true_return_type():
+    input = '''<? function foo(): true {} '''
+    expected = [
+        Function('foo', [], [], False, return_type='true'),
+    ]
+    eq_ast(input, expected)
+
+def test_true_param_type():
+    input = '''<? function bar(true $val): void {} '''
+    expected = [
+        Function('bar', [FormalParameter('$val', None, False, 'true')], [],
+                 False, return_type='void'),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.3 tests
+
+def test_typed_class_constant():
+    input = '''<? class Foo { public const int MAX_SIZE = 100; } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassConstants([ClassConstant('MAX_SIZE', 100, const_type='int')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_typed_class_constant_no_modifier():
+    input = '''<? class Foo { const string NAME = 'test'; } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassConstants([ClassConstant('NAME', 'test', const_type='string')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_dynamic_class_constant_fetch():
+    input = '''<? echo Foo::{$var}; '''
+    expected = [
+        Echo([StaticProperty('Foo', Variable('$var'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_dynamic_class_constant_fetch_expr():
+    input = '''<? echo $obj::{$arr['key']}; '''
+    expected = [
+        Echo([StaticProperty(Variable('$obj'), ArrayOffset(Variable('$arr'), 'key'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_simple():
+    """PHP 8.2: DNF type (A&B)|C"""
+    input = '''<? function foo((A&B)|C $param): (A&B)|C {} '''
+    expected = [
+        Function('foo',
+                 [FormalParameter('$param', None, False, '(A&B)|C')],
+                 [],
+                 False, return_type='(A&B)|C'),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_complex():
+    """PHP 8.2: DNF type (A&B)|(C&D)"""
+    input = '''<? function bar((A&B)|(C&D) $p): (A&B)|(C&D)|null {} '''
+    expected = [
+        Function('bar',
+                 [FormalParameter('$p', None, False, '(A&B)|(C&D)')],
+                 [],
+                 False, return_type='(A&B)|(C&D)|null'),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_nullable():
+    """PHP 8.2: Nullable DNF type ?(A&B)"""
+    input = '''<? function baz(): ?(A&B) {} '''
+    expected = [
+        Function('baz', [], [],
+                 False, return_type='?(A&B)'),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.4 tests
+
+def test_new_without_parens_static_method():
+    """PHP 8.4: new Foo()::method()"""
+    input = '''<? new Foo()::method(); '''
+    expected = [
+        StaticMethodCall(New('Foo', []), 'method', []),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_const():
+    """PHP 8.4: new Foo()::BAR"""
+    input = '''<? echo new Foo()::BAR; '''
+    expected = [
+        Echo([StaticProperty(New('Foo', []), 'BAR')]),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_dynamic():
+    """PHP 8.4: new Foo()::{$var}"""
+    input = '''<? echo new Foo()::{$var}; '''
+    expected = [
+        Echo([StaticProperty(New('Foo', []), Variable('$var'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_chain():
+    """PHP 8.4: new Foo()::method()->bar()"""
+    input = '''<? new Foo()::method()->bar(); '''
+    expected = [
+        MethodCall(StaticMethodCall(New('Foo', []), 'method', []), 'bar', []),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_with_args():
+    """PHP 8.4: new Foo($x)::method()"""
+    input = '''<? new Foo($x)::method(); '''
+    expected = [
+        StaticMethodCall(New('Foo', [Parameter(Variable('$x'), False)]), 'method', []),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_short():
+    """PHP 8.4: Property hook with short get"""
+    input = '''<? class Foo { public string $name { get => strtoupper($this->_name); } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$name', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('get', None,
+                                                  FunctionCall('strtoupper', [Parameter(ObjectProperty(Variable('$this'), '_name'), False)]),
+                                                  None, True)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_set_short():
+    """PHP 8.4: Property hooks with get and set (short form)"""
+    input = '''<? class Foo { public int $x { get => $this->_x * 2; set => $this->_x = $value; } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$x', None)],
+                              property_type='int',
+                              hooks=[PropertyHook('get', None,
+                                                  BinaryOp('*', ObjectProperty(Variable('$this'), '_x'), 2),
+                                                  None, True),
+                                     PropertyHook('set', None,
+                                                  Assignment(ObjectProperty(Variable('$this'), '_x'), Variable('$value'), False),
+                                                  None, True)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_body():
+    """PHP 8.4: Property hook with body form get"""
+    input = '''<? class Foo { public string $email { get { return $this->_email; } } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$email', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('get', None,
+                                                  [Return(ObjectProperty(Variable('$this'), '_email'))],
+                                                  None, False)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_set_with_param():
+    """PHP 8.4: Property hook with set having typed parameter"""
+    input = '''<? class Foo { public string $name { set(string $value) { $this->_name = strtolower($value); } } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$name', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('set',
+                                                  [FormalParameter('$value', None, False, 'string')],
+                                                  [Assignment(ObjectProperty(Variable('$this'), '_name'),
+                                                              FunctionCall('strtolower', [Parameter(Variable('$value'), False)]),
+                                                              False)],
+                                                  None, False)])]),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.5 tests
+
+def test_pipe_operator():
+    """PHP 8.5: Pipe operator |>"""
+    input = """<? $result = $x |> trim(...) |> strtolower(...);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$result'),
+                    Pipe(Pipe(Variable('$x'), FirstClassCallable('trim')),
+                         FirstClassCallable('strtolower')), False)]
+    )
+
+def test_pipe_with_closure():
+    """PHP 8.5: Pipe with arrow function"""
+    input = """<? $x |> (fn($v) => $v * 2) |> (fn($v) => $v + 1);"""
+    eq_ast(
+        input,
+        [Pipe(Pipe(Variable('$x'),
+                   ArrowFunction([FormalParameter('$v', None, False, None)],
+                                 BinaryOp('*', Variable('$v'), 2), None, False)),
+              ArrowFunction([FormalParameter('$v', None, False, None)],
+                            BinaryOp('+', Variable('$v'), 1), None, False))]
+    )
+
+def test_clone_with():
+    """PHP 8.5: clone() with properties"""
+    input = """<? $new = clone($obj, ['key' => $val]);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$new'),
+                    CloneWith(Variable('$obj'),
+                              Array([ArrayElement('key', Variable('$val'), False)])),
+                    False)]
+    )
+
+def test_clone_with_multiple():
+    """PHP 8.5: clone() with multiple properties"""
+    input = """<? $new = clone($this, ['alpha' => 128, 'red' => 255]);"""
+    eq_ast(
+        input,
+        [Assignment(Variable('$new'),
+                    CloneWith(Variable('$this'),
+                              Array([ArrayElement('alpha', 128, False),
+                                     ArrayElement('red', 255, False)])),
+                    False)]
+    )
+
+def test_void_cast():
+    """PHP 8.5: (void) cast"""
+    input = """<? (void)$x;"""
+    eq_ast(input, [VoidCast(Variable('$x'))])
+
+def test_void_cast_function_call():
+    """PHP 8.5: (void) cast on function call to discard result"""
+    input = """<? (void)getPhpVersion();"""
+    eq_ast(
+        input,
+        [VoidCast(FunctionCall('getPhpVersion', []))]
+    )
+
+# Issue fix tests
+
+def test_issue_61_arrow_function_return_type():
+    """Issue #61: Arrow function with return type"""
+    eq_ast(
+        '<?php $fn = fn(int $x): int => $x * 2;',
+        [Assignment(Variable('$fn'),
+         ArrowFunction([FormalParameter('$x', None, False, 'int')],
+                       BinaryOp('*', Variable('$x'), 2), 'int', False),
+         False)]
+    )
+
+def test_issue_61_arrow_function_nullable_return():
+    """Issue #61: Arrow function with nullable return type"""
+    eq_ast(
+        '<?php $fn = fn(): ?int => null;',
+        [Assignment(Variable('$fn'),
+         ArrowFunction([], Constant('null'), '?int', False),
+         False)]
+    )
+
+def test_issue_54_static_scalar_concat():
+    """Issue #54: Concat in static scalar (class variable default)"""
+    eq_ast(
+        '<?php class Example { private static $var = \'test\' . \'ing\'; }',
+        [Class('Example', None, None, [], [],
+         [ClassVariables(['private', 'static'],
+          [ClassVariable('$var', BinaryOp('.', 'test', 'ing'))],
+          None, None)])]
+    )
+
+def test_issue_54_static_scalar_concat_multi():
+    """Issue #54: Multiple concat in static scalar"""
+    eq_ast(
+        '<?php $x = \'a\' . \'b\' . \'c\';',
+        [Assignment(Variable('$x'),
+         BinaryOp('.', BinaryOp('.', 'a', 'b'), 'c'),
+         False)]
+    )
+
+def test_issue_52_variadic_parameter():
+    """Issue #52/PHP 5.6: Variadic parameter ...$args"""
+    eq_ast(
+        '<?php function foo(...$args) {}',
+        [Function('foo', [FormalParameter('$args', None, False, None)],
+         [], False, None)]
+    )
+
+def test_issue_52_typed_variadic_parameter():
+    """Issue #52: Typed variadic parameter int ...$nums"""
+    eq_ast(
+        '<?php function bar(int ...$nums) {}',
+        [Function('bar', [FormalParameter('$nums', None, False, 'int')],
+         [], False, None)]
+    )
+
+def test_issue_21_invalid_octal():
+    """Issue #21: Invalid octal notation (0987) should parse as 0"""
+    eq_ast(
+        '<?php 0987;',
+        [0]
+    )
+
+def test_issue_21_valid_octal():
+    """Issue #21: Valid octal notation"""
+    eq_ast(
+        '<?php 0777;',
+        [511]
+    )
+
+def test_issue_21_hex_uppercase():
+    """Issue #21: Hex with uppercase 0X prefix"""
+    eq_ast(
+        '<?php 0XFF;',
+        [255]
+    )
+
+def test_issue_21_binary_uppercase():
+    """Issue #21: Binary with uppercase 0B prefix"""
+    eq_ast(
+        '<?php 0B1010;',
+        [10]
+    )
+
+def test_issue_7_end_lineno():
+    """Issue #7: end_lineno support on AST nodes"""
+    from phply import phpast
+    node = phpast.Function('test', [], [], False, None, lineno=5, end_lineno=10)
+    assert node.lineno == 5
+    assert node.end_lineno == 10
+    g = node.generic(with_lineno=True)
+    assert g[1]['lineno'] == 5
+    assert g[1]['end_lineno'] == 10

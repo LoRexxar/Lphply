@@ -18,6 +18,21 @@ else:
 # Get the token map
 tokens = phplex.tokens
 
+
+def _linespan(p, n):
+    """Get (start_line, end_line) for symbol n in production p."""
+    try:
+        return p.linespan(n)
+    except AttributeError:
+        line = p.lineno(n)
+        return (line, line)
+
+
+def _mkpos(p, n=1):
+    """Create lineno/end_lineno kwargs from production p at symbol n."""
+    start, end = _linespan(p, n)
+    return {'lineno': start, 'end_lineno': end}
+
 precedence = (
     ('left', 'INCLUDE', 'INCLUDE_ONCE', 'EVAL', 'REQUIRE', 'REQUIRE_ONCE'),
     ('left', 'COMMA'),
@@ -25,23 +40,28 @@ precedence = (
     ('left', 'LOGICAL_XOR'),
     ('left', 'LOGICAL_AND'),
     ('right', 'PRINT'),
-    ('left', 'EQUALS', 'PLUS_EQUAL', 'MINUS_EQUAL', 'MUL_EQUAL', 'DIV_EQUAL', 'CONCAT_EQUAL', 'MOD_EQUAL', 'AND_EQUAL', 'OR_EQUAL', 'XOR_EQUAL', 'SL_EQUAL', 'SR_EQUAL'),
-    ('left', 'QUESTION', 'COLON'),
+    ('left', 'EQUALS', 'PLUS_EQUAL', 'MINUS_EQUAL', 'MUL_EQUAL', 'DIV_EQUAL', 'CONCAT_EQUAL', 'MOD_EQUAL', 'AND_EQUAL', 'OR_EQUAL', 'XOR_EQUAL', 'SL_EQUAL', 'SR_EQUAL', 'COALESCE_EQUAL', 'POW_EQUAL'),
+    ('left', 'QUESTION'),
     ('left', 'BOOLEAN_OR'),
+    ('right', 'COALESCE'),
     ('left', 'BOOLEAN_AND'),
     ('left', 'OR'),
     ('left', 'XOR'),
     ('left', 'AND'),
     ('nonassoc', 'IS_EQUAL', 'IS_NOT_EQUAL', 'IS_IDENTICAL', 'IS_NOT_IDENTICAL'),
-    ('nonassoc', 'IS_SMALLER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER', 'IS_GREATER_OR_EQUAL'),
+    ('nonassoc', 'IS_SMALLER', 'IS_SMALLER_OR_EQUAL', 'IS_GREATER', 'IS_GREATER_OR_EQUAL', 'SPACESHIP'),
+    # PHP 8.5: Pipe operator precedence (between comparison and concat, like PHP's zend_parser)
+    ('left', 'PIPE'),
     ('left', 'SL', 'SR'),
     ('left', 'PLUS', 'MINUS', 'CONCAT'),
+    ('right', 'POW'),
     ('left', 'MUL', 'DIV', 'MOD'),
     ('right', 'BOOLEAN_NOT'),
     ('nonassoc', 'INSTANCEOF'),
-    ('right', 'NOT', 'INC', 'DEC', 'INT_CAST', 'DOUBLE_CAST', 'STRING_CAST', 'ARRAY_CAST', 'OBJECT_CAST', 'BOOL_CAST', 'UNSET_CAST', 'AT'),
+    ('right', 'NOT', 'INC', 'DEC', 'INT_CAST', 'DOUBLE_CAST', 'STRING_CAST', 'ARRAY_CAST', 'OBJECT_CAST', 'BOOL_CAST', 'UNSET_CAST', 'VOID_CAST', 'AT'),
     ('right', 'LBRACKET'),
     ('nonassoc', 'NEW', 'CLONE'),
+    ('left', 'THROW'),
     # ('left', 'ELSEIF'),
     # ('left', 'ELSE'),
     ('left', 'ENDIF'),
@@ -285,10 +305,13 @@ def p_statement_try(p):
 
 def p_additional_catches(p):
     '''additional_catches : additional_catches CATCH LPAREN fully_qualified_class_name VARIABLE RPAREN LBRACE inner_statement_list RBRACE
+                          | additional_catches CATCH LPAREN fully_qualified_class_name RPAREN LBRACE inner_statement_list RBRACE
                           | empty'''
     if len(p) == 10:
         p[0] = p[1] + [ast.Catch(p[4], ast.Variable(p[5], lineno=p.lineno(5)),
                                  p[8], lineno=p.lineno(2))]
+    elif len(p) == 9:
+        p[0] = p[1] + [ast.Catch(p[4], None, p[7], lineno=p.lineno(2))]
     else:
         p[0] = []
 
@@ -303,6 +326,46 @@ def p_maybe_finally(p):
 def p_statement_throw(p):
     'statement : THROW expr SEMI'
     p[0] = ast.Throw(p[2], lineno=p.lineno(1))
+
+def p_expr_throw(p):
+    'expr : THROW expr'
+    p[0] = ast.Throw(p[2], lineno=p.lineno(1))
+
+def p_expr_match(p):
+    'expr : MATCH LPAREN expr RPAREN LBRACE match_list RBRACE'
+    p[0] = ast.Match(p[3], p[6], lineno=p.lineno(1))
+
+def p_match_list(p):
+    '''match_list : empty
+                  | non_empty_match_list possible_comma'''
+    if len(p) == 2:
+        p[0] = []
+    else:
+        p[0] = p[1]
+
+def p_non_empty_match_list(p):
+    '''non_empty_match_list : non_empty_match_list COMMA match_pair
+                            | match_pair'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
+
+def p_match_pair(p):
+    'match_pair : match_condition_list DOUBLE_ARROW expr'
+    p[0] = ast.MatchArm(p[1], p[3], lineno=p.lineno(2))
+
+def p_match_pair_default(p):
+    'match_pair : DEFAULT DOUBLE_ARROW expr'
+    p[0] = ast.MatchDefaultArm(p[3], lineno=p.lineno(1))
+
+def p_match_condition_list(p):
+    '''match_condition_list : match_condition_list COMMA expr
+                            | expr'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
 
 def p_statement_declare(p):
     'statement : DECLARE LPAREN declare_list RPAREN declare_statement'
@@ -498,24 +561,42 @@ def p_unset_variable(p):
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
-    'function_declaration_statement : FUNCTION is_reference STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE'
-    p[0] = ast.Function(p[3], p[5], p[8], p[2], lineno=p.lineno(1))
+    'function_declaration_statement : FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type LBRACE inner_statement_list RBRACE'
+    p[0] = ast.Function(p[3], p[5], p[9], p[2], return_type=p[7], lineno=p.lineno(1))
 
 def p_class_declaration_statement(p):
     '''class_declaration_statement : class_entry_type STRING extends_from implements_list LBRACE class_statement_list RBRACE
                                    | INTERFACE STRING interface_extends_list LBRACE class_statement_list RBRACE
-                                   | TRAIT STRING LBRACE trait_statement_list RBRACE'''
+                                   | TRAIT STRING LBRACE trait_statement_list RBRACE
+                                   | ENUM STRING optional_enum_backing_type implements_list LBRACE enum_statement_list RBRACE'''
     if len(p) == 8:
-        traits = []
-        stmts = []
-        for s in p[6]:
-            if isinstance(s, ast.TraitUse):
-                traits.append(s)
-            else:
-                stmts.append(s)
-        p[0] = ast.Class(p[2], p[1], p[3], p[4], traits, stmts, lineno=p.lineno(2))
+        if p.slice[1].type == "ENUM":
+            stmts = []
+            for s in p[6]:
+                if not isinstance(s, ast.TraitUse):
+                    stmts.append(s)
+            p[0] = ast.Enum(p[2], p[3], p[4], stmts, lineno=p.lineno(2))
+        else:
+            traits = []
+            stmts = []
+            for s in p[6]:
+                if isinstance(s, ast.TraitUse):
+                    traits.append(s)
+                else:
+                    stmts.append(s)
+            p[0] = ast.Class(p[2], p[1], p[3], p[4], traits, stmts, lineno=p.lineno(2))
     elif len(p) == 7:
-        p[0] = ast.Interface(p[2], p[3], p[5], lineno=p.lineno(1))
+        if p[1] == 'enum':
+            traits = []
+            stmts = []
+            for s in p[6]:
+                if isinstance(s, ast.TraitUse):
+                    traits.append(s)
+                else:
+                    stmts.append(s)
+            p[0] = ast.Enum(p[2], p[3], p[4], stmts, lineno=p.lineno(1))
+        else:
+            p[0] = ast.Interface(p[2], p[3], p[5], lineno=p.lineno(1))
     else:
         traits = []
         stmts = []
@@ -529,9 +610,49 @@ def p_class_declaration_statement(p):
 def p_class_entry_type(p):
     '''class_entry_type : CLASS
                         | ABSTRACT CLASS
-                        | FINAL CLASS'''
+                        | FINAL CLASS
+                        | READONLY CLASS'''
     if len(p) == 3:
         p[0] = p[1].lower()
+
+def p_optional_enum_backing_type(p):
+    '''optional_enum_backing_type : COLON type_expr
+                                  | empty'''
+    if len(p) == 3:
+        p[0] = p[2]
+    else:
+        p[0] = None
+
+def p_enum_statement_list(p):
+    '''enum_statement_list : enum_statement_list enum_statement
+                           | empty'''
+    if len(p) == 3:
+        p[0] = p[1] + [p[2]]
+    else:
+        p[0] = []
+
+def p_enum_statement(p):
+    '''enum_statement : enum_constant SEMI
+                      | method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                      | USE fully_qualified_class_name SEMI
+                      | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE'''
+    if p.slice[1].type == 'enum_constant':
+        p[0] = p[1]
+    elif p.slice[1].type == 'USE':
+        if len(p) == 4:
+            p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
+        else:
+            p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    else:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
+
+def p_enum_constant(p):
+    '''enum_constant : CASE STRING
+                     | CASE STRING EQUALS static_expr'''
+    if len(p) == 3:
+        p[0] = ast.EnumCase(p[2], None, lineno=p.lineno(1))
+    else:
+        p[0] = ast.EnumCase(p[2], p[4], lineno=p.lineno(1))
 
 def p_extends_from(p):
     '''extends_from : empty
@@ -596,19 +717,24 @@ def p_trait_statement_list(p):
         p[0] = []
 
 def p_trait_statement(p):
-    '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN method_body
-                       | variable_modifiers class_variable_declaration SEMI
+    '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                       | variable_modifiers optional_property_type class_variable_declaration SEMI
+                       | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
                        | USE fully_qualified_class_name SEMI'''
-    if len(p) == 9:
-        p[0] = ast.Method(p[4], p[1], p[6], p[8], p[3], lineno=p.lineno(2))
+    if len(p) == 10:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    elif len(p) == 5:
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
+    elif len(p) == 3:
+        p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     else:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
         else:
-            p[0] = ast.ClassVariables(p[1], p[2], lineno=p.lineno(3))
+            p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
 def p_class_statement_list(p):
     '''class_statement_list : class_statement_list class_statement
@@ -620,20 +746,28 @@ def p_class_statement_list(p):
         p[0] = []
 
 def p_class_statement(p):
-    '''class_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN method_body
-                       | variable_modifiers class_variable_declaration SEMI
+    '''class_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                       | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
-                       | USE fully_qualified_class_name SEMI'''
-    if len(p) == 9:
-        p[0] = ast.Method(p[4], p[1], p[6], p[8], p[3], lineno=p.lineno(2))
+                       | USE fully_qualified_class_name SEMI
+                       | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE'''
+    if len(p) == 10:
+        p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+    elif len(p) == 5:
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
     elif len(p) == 4:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
         else:
-            p[0] = ast.ClassVariables(p[1], p[2], lineno=p.lineno(3))
+            p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
+    elif len(p) == 7:
+        # PHP 8.4: Property hooks
+        # variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
+        p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], None, lineno=p.lineno(3))],
+                                   property_type=p[2], hooks=p[5], lineno=p.lineno(4))
     else:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
@@ -655,11 +789,26 @@ def p_class_variable_declaration_no_initial(p):
 
 def p_class_constant_declaration(p):
     '''class_constant_declaration : class_constant_declaration COMMA STRING EQUALS static_expr
-                                  | CONST STRING EQUALS static_expr'''
+                                  | CONST STRING EQUALS static_expr
+                                  | non_empty_member_modifiers CONST STRING EQUALS static_expr
+                                  | CONST type_expr STRING EQUALS static_expr
+                                  | non_empty_member_modifiers CONST type_expr STRING EQUALS static_expr'''
     if len(p) == 6:
-        p[0] = p[1] + [ast.ClassConstant(p[3], p[5], lineno=p.lineno(2))]
-    else:
-        p[0] = [ast.ClassConstant(p[2], p[4], lineno=p.lineno(1))]
+        if p.slice[2].type == 'COMMA':
+            # class_constant_declaration COMMA STRING EQUALS static_expr
+            p[0] = p[1] + [ast.ClassConstant(p[3], p[5], const_type=None, lineno=p.lineno(2))]
+        elif p.slice[1].type == 'CONST':
+            # CONST type_expr STRING EQUALS static_expr
+            p[0] = [ast.ClassConstant(p[3], p[5], const_type=p[2], lineno=p.lineno(1))]
+        else:
+            # non_empty_member_modifiers CONST STRING EQUALS static_expr (no type)
+            p[0] = [ast.ClassConstant(p[3], p[5], const_type=None, lineno=p.lineno(2))]
+    elif len(p) == 7:
+        # non_empty_member_modifiers CONST type_expr STRING EQUALS static_expr
+        p[0] = [ast.ClassConstant(p[4], p[6], const_type=p[3], lineno=p.lineno(2))]
+    elif len(p) == 5:
+        # CONST STRING EQUALS static_expr (no type)
+        p[0] = [ast.ClassConstant(p[2], p[4], const_type=None, lineno=p.lineno(1))]
 
 def p_interface_list(p):
     '''interface_list : interface_list COMMA fully_qualified_class_name
@@ -668,6 +817,43 @@ def p_interface_list(p):
         p[0] = p[1] + [p[3]]
     else:
         p[0] = [p[1]]
+
+# PHP 8.4: Property Hooks
+def p_property_hook_list(p):
+    '''property_hook_list : property_hook_list property_hook
+                          | property_hook'''
+    if len(p) == 3:
+        p[0] = p[1] + [p[2]]
+    else:
+        p[0] = [p[1]]
+
+def p_property_hook(p):
+    '''property_hook : STRING DOUBLE_ARROW expr SEMI
+                     | STRING LBRACE inner_statement_list RBRACE
+                     | STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+                     | member_modifier STRING DOUBLE_ARROW expr SEMI
+                     | member_modifier STRING LBRACE inner_statement_list RBRACE
+                     | member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE'''
+    if len(p) == 5 and p.slice[2].type == 'DOUBLE_ARROW':
+        # STRING DOUBLE_ARROW expr SEMI (short form, e.g. get => expr;)
+        p[0] = ast.PropertyHook(p[1], None, p[3], None, True)
+    elif len(p) == 5 and p.slice[2].type == 'LBRACE':
+        # STRING LBRACE inner_statement_list RBRACE (body form)
+        p[0] = ast.PropertyHook(p[1], None, p[3], None, False)
+    elif len(p) == 8:
+        # STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[1], p[3], p[6], None, False)
+    elif len(p) == 6 and p.slice[3].type == 'DOUBLE_ARROW':
+        # member_modifier STRING DOUBLE_ARROW expr SEMI
+        p[0] = ast.PropertyHook(p[2], None, p[4], p[1], True)
+    elif len(p) == 6 and p.slice[3].type == 'LBRACE':
+        # member_modifier STRING LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[2], None, p[4], p[1], False)
+    elif len(p) == 9:
+        # member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[2], p[4], p[7], p[1], False)
+
+
 
 def p_interface_extends_list(p):
     '''interface_extends_list : EXTENDS interface_list
@@ -717,7 +903,8 @@ def p_member_modifier(p):
     '''member_modifier : visibility_modifier
                        | STATIC
                        | ABSTRACT
-                       | FINAL'''
+                       | FINAL
+                       | READONLY'''
     p[0] = p[1].lower()
 
 def p_is_reference(p):
@@ -727,9 +914,12 @@ def p_is_reference(p):
 
 def p_parameter_list(p):
     '''parameter_list : parameter_list COMMA parameter
-                      | parameter'''
+                      | parameter
+                      | parameter_list COMMA'''
     if len(p) == 4:
         p[0] = p[1] + [p[3]]
+    elif len(p) == 3:
+        p[0] = p[1]
     else:
         p[0] = [p[1]]
 
@@ -737,31 +927,125 @@ def p_parameter_list_empty(p):
     'parameter_list : empty'
     p[0] = []
 
+def p_type_expr(p):
+    'type_expr : fully_qualified_class_name'
+    p[0] = p[1]
+
+def p_type_expr_static(p):
+    'type_expr : STATIC'
+    p[0] = p[1].lower()
+
+def p_type_expr_mixed(p):
+    'type_expr : MIXED'
+    p[0] = p[1].lower()
+
+def p_type_expr_never(p):
+    'type_expr : NEVER'
+    p[0] = p[1].lower()
+
+def p_type_expr_nullable(p):
+    'type_expr : QUESTION type_expr'
+    p[0] = "?" + p[2]
+
+def p_type_expr_union(p):
+    'type_expr : type_expr OR type_expr'
+    p[0] = p[1] + "|" + p[3]
+
+def p_type_expr_intersection(p):
+    'type_expr : type_expr AND type_expr'
+    p[0] = p[1] + "&" + p[3]
+
+# PHP 8.2: DNF types - parenthesized type (for intersection groups in unions)
+def p_type_expr_dnf(p):
+    'type_expr : LPAREN type_expr RPAREN'
+    p[0] = "(" + p[2] + ")"
+
+def p_optional_return_type(p):
+    '''optional_return_type : COLON type_expr
+                            | empty'''
+    if len(p) == 3:
+        p[0] = p[2]
+    else:
+        p[0] = None
+
+def p_optional_property_type(p):
+    '''optional_property_type : type_expr
+                              | empty'''
+    if len(p) == 2 and p[1] is not None:
+        p[0] = p[1]
+    else:
+        p[0] = None
+
+def _parse_parameter(parts, lineno):
+    """Parse parameter from a list of tokens (excluding rule name)."""
+    # parts[0] is None (rule name placeholder), actual tokens start at index 1
+    n = len(parts) - 1  # number of actual tokens
+    is_nullable = parts[1] == '?'
+    if is_nullable:
+        type_hint = "?" + parts[2]
+    else:
+        type_hint = parts[1] if n >= 2 and parts[1] not in ('&',) else None
+
+    if n == 1:  # VARIABLE
+        return ast.FormalParameter(parts[1], None, False, None, lineno=lineno)
+    elif n == 2 and parts[1] == '&':  # AND VARIABLE
+        return ast.FormalParameter(parts[2], None, True, None, lineno=lineno)
+    elif n == 2 and parts[1] == '...':  # ELLIPSIS VARIABLE (variadic)
+        return ast.FormalParameter(parts[2], None, False, None, lineno=lineno)
+    elif n == 2 and parts[1] != '&' and parts[1] != '...':  # class_name VARIABLE
+        return ast.FormalParameter(parts[2], None, False, parts[1], lineno=lineno)
+    elif n == 3 and parts[1] == '?':  # QUESTION class_name VARIABLE
+        return ast.FormalParameter(parts[3], None, False, type_hint, lineno=lineno)
+    elif n == 3 and parts[2] == '...':  # type_expr ELLIPSIS VARIABLE (typed variadic)
+        return ast.FormalParameter(parts[3], None, False, parts[1], lineno=lineno)
+    elif n == 3 and parts[2] != '&' and parts[2] != '...':  # VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[1], parts[3], False, None, lineno=lineno)
+    elif n == 3 and parts[2] == '&':  # class_name AND VARIABLE
+        return ast.FormalParameter(parts[3], None, True, parts[1], lineno=lineno)
+    elif n == 4 and parts[1] == '&':  # AND VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[2], parts[4], True, None, lineno=lineno)
+    elif n == 4 and parts[1] != '&' and parts[1] != '?':  # class_name VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[2], parts[4], False, parts[1], lineno=lineno)
+    elif n == 4 and parts[1] == '?':  # QUESTION class_name AND VARIABLE
+        return ast.FormalParameter(parts[4], None, True, type_hint, lineno=lineno)
+    elif n == 5 and parts[1] == '?':  # QUESTION class_name VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[3], parts[5], False, type_hint, lineno=lineno)
+    elif n == 5 and parts[1] != '?':  # class_name AND VARIABLE EQUALS static_scalar
+        return ast.FormalParameter(parts[3], parts[5], True, parts[1], lineno=lineno)
+    else:  # QUESTION class_name AND VARIABLE EQUALS static_scalar (n=6)
+        return ast.FormalParameter(parts[4], parts[6], True, type_hint, lineno=lineno)
+
 def p_parameter(p):
     '''parameter : VARIABLE
-                 | class_name VARIABLE
+                 | type_expr VARIABLE
                  | AND VARIABLE
-                 | class_name AND VARIABLE
+                 | type_expr AND VARIABLE
                  | VARIABLE EQUALS static_scalar
-                 | class_name VARIABLE EQUALS static_scalar
+                 | type_expr VARIABLE EQUALS static_scalar
                  | AND VARIABLE EQUALS static_scalar
-                 | class_name AND VARIABLE EQUALS static_scalar'''
-    if len(p) == 2: # VARIABLE
-        p[0] = ast.FormalParameter(p[1], None, False, None, lineno=p.lineno(1))
-    elif len(p) == 3 and p[1] == '&': # AND VARIABLE
-        p[0] = ast.FormalParameter(p[2], None, True, None, lineno=p.lineno(1))
-    elif len(p) == 3 and p[1] != '&': # STRING VARIABLE
-        p[0] = ast.FormalParameter(p[2], None, False, p[1], lineno=p.lineno(1))
-    elif len(p) == 4 and p[2] != '&': # VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[1], p[3], False, None, lineno=p.lineno(1))
-    elif len(p) == 4 and p[2] == '&': # STRING AND VARIABLE
-        p[0] = ast.FormalParameter(p[3], None, True, p[1], lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] == '&': # AND VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[2], p[4], True, None, lineno=p.lineno(1))
-    elif len(p) == 5 and p[1] != '&': # class_name VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[2], p[4], False, p[1], lineno=p.lineno(1))
-    else: # STRING AND VARIABLE EQUALS static_scalar
-        p[0] = ast.FormalParameter(p[3], p[5], True, p[1], lineno=p.lineno(1))
+                 | type_expr AND VARIABLE EQUALS static_scalar
+                 | QUESTION type_expr VARIABLE
+                 | QUESTION type_expr AND VARIABLE
+                 | QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | ELLIPSIS VARIABLE
+                 | type_expr ELLIPSIS VARIABLE'''
+    p[0] = _parse_parameter(list(p), p.lineno(1))
+
+def p_parameter_promoted(p):
+    '''parameter : visibility_modifier VARIABLE
+                 | visibility_modifier type_expr VARIABLE
+                 | visibility_modifier type_expr AND VARIABLE
+                 | visibility_modifier VARIABLE EQUALS static_scalar
+                 | visibility_modifier type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier QUESTION type_expr VARIABLE
+                 | visibility_modifier QUESTION type_expr AND VARIABLE
+                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+    # Strip visibility modifier and parse the rest as a normal parameter
+    shifted = [None] + list(p)[2:]
+    p[0] = _parse_parameter(shifted, p.lineno(1))
 
 def p_expr_variable(p):
     'expr : variable'
@@ -779,6 +1063,17 @@ def p_expr_new(p):
     'expr : NEW class_name_reference ctor_arguments'
     p[0] = ast.New(p[2], p[3], lineno=p.lineno(1))
 
+# PHP 8.4: new without parentheses
+# Allow new expressions (with or without parentheses) to chain with :: 
+# We add new_expr as a variable_class_name so it works with existing static_member/function_call rules
+def p_variable_class_name_new_expr(p):
+    '''variable_class_name : NEW class_name_reference ctor_arguments
+                           | LPAREN NEW class_name_reference ctor_arguments RPAREN'''
+    if len(p) == 4:
+        p[0] = ast.New(p[2], p[3], lineno=p.lineno(1))
+    else:
+        p[0] = ast.New(p[3], p[4], lineno=p.lineno(2))
+
 def p_expr_objectop(p):
     'expr : expr OBJECT_OPERATOR object_property method_or_not'
     name, _dims = p[3]
@@ -788,6 +1083,16 @@ def p_expr_objectop(p):
         p[0] = ast.MethodCall(p[1], name, params, lineno=p.lineno(3))
     else:
         p[0] = ast.ObjectProperty(p[1], name, lineno=p.lineno(3))
+
+def p_expr_nullsafe_objectop(p):
+    'expr : expr NULLSAFE_OBJECT_OPERATOR object_property method_or_not'
+    name, _dims = p[3]
+    assert _dims == []
+    params = p[4]
+    if params is not None:
+        p[0] = ast.NullsafeMethodCall(p[1], name, params, lineno=p.lineno(3))
+    else:
+        p[0] = ast.NullsafeProperty(p[1], name, lineno=p.lineno(3))
 
 def p_class_name_reference(p):
     '''class_name_reference : class_name
@@ -845,8 +1150,18 @@ def p_ctor_arguments(p):
         p[0] = []
 
 def p_expr_clone(p):
-    'expr : CLONE expr'
-    p[0] = ast.Clone(p[2], lineno=p.lineno(1))
+    '''expr : CLONE expr
+            | CLONE LPAREN expr COMMA expr RPAREN'''
+    if len(p) == 3:
+        p[0] = ast.Clone(p[2], lineno=p.lineno(1))
+    else:
+        # PHP 8.5: clone($obj, ['prop' => $val])
+        p[0] = ast.CloneWith(p[3], p[5], lineno=p.lineno(1))
+
+# PHP 8.5: Pipe operator
+def p_expr_pipe(p):
+    'expr : expr PIPE expr'
+    p[0] = ast.Pipe(p[1], p[3], lineno=p.lineno(2))
 
 def p_expr_list_assign(p):
     'expr : LIST LPAREN assignment_list RPAREN EQUALS expr'
@@ -926,6 +1241,20 @@ def p_function_call_variable(p):
 def p_function_call_backtick_shell_exec(p):
     'function_call : BACKTICK encaps_list BACKTICK'
     p[0] = ast.FunctionCall('shell_exec', [ast.Parameter(p[2], False)], lineno=p.lineno(1))
+
+def p_function_call_first_class_callable(p):
+    '''function_call : namespace_name LPAREN ELLIPSIS RPAREN
+                     | NS_SEPARATOR namespace_name LPAREN ELLIPSIS RPAREN'''
+    if len(p) == 5:
+        p[0] = ast.FirstClassCallable(p[1], lineno=p.lineno(1))
+    else:
+        p[0] = ast.FirstClassCallable(p[1] + p[2], lineno=p.lineno(1))
+
+def p_function_call_first_class_callable_static(p):
+    '''function_call : class_name DOUBLE_COLON STRING LPAREN ELLIPSIS RPAREN
+                     | variable_class_name DOUBLE_COLON STRING LPAREN ELLIPSIS RPAREN'''
+    p[0] = ast.FirstClassCallable(ast.StaticProperty(p[1], p[3], lineno=p.lineno(2)),
+                                  lineno=p.lineno(1))
 
 def p_method_or_not(p):
     '''method_or_not : LPAREN function_call_parameter_list RPAREN
@@ -1112,6 +1441,16 @@ def p_function_call_parameter(p):
     else:
         p[0] = ast.Parameter(p[2], True, lineno=p.lineno(1))
 
+def p_function_call_parameter_named(p):
+    '''function_call_parameter : STRING COLON expr
+                               | ARRAY COLON expr'''
+    p[0] = ast.NamedParameter(p[1], p[3], False, lineno=p.lineno(1))
+
+def p_function_call_parameter_named_ref(p):
+    '''function_call_parameter : STRING COLON AND variable
+                               | ARRAY COLON AND variable'''
+    p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
+
 def p_expr_function(p):
     'expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE'
     p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
@@ -1149,8 +1488,18 @@ def p_expr_assign_op(p):
             | variable OR_EQUAL expr
             | variable XOR_EQUAL expr
             | variable SL_EQUAL expr
-            | variable SR_EQUAL expr'''
+            | variable SR_EQUAL expr
+            | variable COALESCE_EQUAL expr
+            | variable POW_EQUAL expr'''
     p[0] = ast.AssignOp(p[2], p[1], p[3], lineno=p.lineno(2))
+
+def p_function_call_parameter_ellipsis(p):
+    'function_call_parameter : ELLIPSIS expr'
+    p[0] = ast.Parameter(p[2], False, lineno=p.lineno(1))
+
+def p_expr_arrow_function(p):
+    '''expr : FN is_reference LPAREN parameter_list RPAREN optional_return_type DOUBLE_ARROW expr'''
+    p[0] = ast.ArrowFunction(p[4], p[8], p[6], p[2], lineno=p.lineno(1))
 
 def p_expr_binary_op(p):
     '''expr : expr BOOLEAN_AND expr
@@ -1178,7 +1527,10 @@ def p_expr_binary_op(p):
             | expr IS_GREATER expr
             | expr IS_GREATER_OR_EQUAL expr
             | expr INSTANCEOF expr
-            | expr INSTANCEOF STATIC'''
+            | expr INSTANCEOF STATIC
+            | expr COALESCE expr
+            | expr SPACESHIP expr
+            | expr POW expr'''
     p[0] = ast.BinaryOp(p[2].lower(), p[1], p[3], lineno=p.lineno(2))
 
 def p_expr_unary_op(p):
@@ -1189,11 +1541,11 @@ def p_expr_unary_op(p):
     p[0] = ast.UnaryOp(p[1], p[2], lineno=p.lineno(1))
 
 def p_expr_ternary_op(p):
-    'expr : expr QUESTION expr COLON expr'
+    'expr : expr QUESTION expr COLON expr %prec QUESTION'
     p[0] = ast.TernaryOp(p[1], p[3], p[5], lineno=p.lineno(2))
 
 def p_expr_short_ternary_op(p):
-    'expr : expr QUESTION COLON expr'
+    'expr : expr QUESTION COLON expr %prec QUESTION'
     p[0] = ast.TernaryOp(p[1], p[1], p[4], lineno=p.lineno(2))
 
 def p_expr_pre_incdec(p):
@@ -1237,6 +1589,11 @@ def p_expr_cast_unset(p):
 def p_expr_cast_binary(p):
     'expr : BINARY_CAST expr'
     p[0] = ast.Cast('binary', p[2], lineno=p.lineno(1))
+
+# PHP 8.5: void cast
+def p_expr_cast_void(p):
+    'expr : VOID_CAST expr'
+    p[0] = ast.VoidCast(p[2], lineno=p.lineno(1))
 
 def p_expr_isset(p):
     'expr : ISSET LPAREN isset_variables RPAREN'
@@ -1371,12 +1728,15 @@ def p_class_constant(p):
 
 def p_common_scalar_lnumber(p):
     'common_scalar : LNUMBER'
-    if p[1].startswith('0x'):
+    if p[1].startswith('0x') or p[1].startswith('0X'):
         p[0] = int(p[1], 16)
-    elif p[1].startswith('0b'):
+    elif p[1].startswith('0b') or p[1].startswith('0B'):
         p[0] = int(p[1], 2)
-    elif p[1].startswith('0'):
+    elif p[1].startswith('0') and len(p[1]) > 1 and all(c in '01234567' for c in p[1][1:]):
         p[0] = int(p[1], 8)
+    elif p[1].startswith('0') and len(p[1]) > 1:
+        # Invalid octal (e.g. 0987) - PHP 7+ treats as parse error, value 0
+        p[0] = 0
     else:
         p[0] = int(p[1])
 
@@ -1475,6 +1835,10 @@ def p_static_scalar_unary_op(p):
     '''static_scalar : PLUS static_scalar
                      | MINUS static_scalar'''
     p[0] = ast.UnaryOp(p[1], p[2], lineno=p.lineno(1))
+
+def p_static_scalar_concat(p):
+    '''static_scalar : static_scalar CONCAT static_scalar'''
+    p[0] = ast.BinaryOp('.', p[1], p[3], lineno=p.lineno(2))
 
 def p_static_scalar_array(p):
     '''static_scalar : ARRAY LPAREN static_array_pair_list RPAREN
