@@ -1,8 +1,6 @@
 # phply
 
-Lexer and parser for PHP source code implemented in Python using [PLY](https://github.com/dabeaz/ply) (Python Lex-Yacc).
-
-Supports PHP **5.6 through 8.5** syntax.
+> Enhanced fork of phply — fixes core AST bugs, Supports PHP **5.6 through 8.5** syntax.
 
 ## Installation
 
@@ -10,7 +8,7 @@ Supports PHP **5.6 through 8.5** syntax.
 pip install lphply
 ```
 
-> **注意：** 由于 `lphply` 的内部包名仍为 `phply`，与上游 `viraptor/phply` 的 PyPI 包冲突。如果之前安装过 `phply`，请先卸载：`pip uninstall phply && pip install lphply`。
+> > **Note:** Since the internal package name of `lphply` is still `phply`, it conflicts with the upstream `viraptor/phply` PyPI package. If you have previously installed `phply`, please uninstall it first: `pip uninstall phply && pip install lphply`.
 
 ## Usage
 
