@@ -95,8 +95,13 @@ Class = node('Class', ['name', 'type', 'extends', 'implements', 'traits', 'nodes
 Trait = node('Trait', ['name', 'traits', 'nodes'])
 ClassConstants = node('ClassConstants', ['nodes'])
 ClassConstant = node('ClassConstant', ['name', 'initial', 'const_type'])
-ClassVariables = node('ClassVariables', ['modifiers', 'nodes', 'property_type'])
+ClassVariables = node('ClassVariables', ['modifiers', 'nodes', 'property_type', 'hooks'])
 ClassVariable = node('ClassVariable', ['name', 'initial'])
+# PHP 8.4: Property Hooks
+PropertyHook = node('PropertyHook', ['name', 'params', 'body', 'modifiers', 'short'])
+# name: 'get' or 'set', params: list of FormalParameter (for set hooks) or None,
+# body: list of statements or single expression, modifiers: list of visibility modifiers or None,
+# short: True for arrow form (get => expr), False for body form (get { stmts })
 Interface = node('Interface', ['name', 'extends', 'nodes'])
 AssignOp = node('AssignOp', ['op', 'left', 'right'])
 BinaryOp = node('BinaryOp', ['op', 'left', 'right'])

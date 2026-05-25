@@ -1267,3 +1267,103 @@ def test_dnf_type_nullable():
                  False, return_type='?(A&B)'),
     ]
     eq_ast(input, expected)
+
+# PHP 8.4 tests
+
+def test_new_without_parens_static_method():
+    """PHP 8.4: new Foo()::method()"""
+    input = '''<? new Foo()::method(); '''
+    expected = [
+        StaticMethodCall(New('Foo', []), 'method', []),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_const():
+    """PHP 8.4: new Foo()::BAR"""
+    input = '''<? echo new Foo()::BAR; '''
+    expected = [
+        Echo([StaticProperty(New('Foo', []), 'BAR')]),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_dynamic():
+    """PHP 8.4: new Foo()::{$var}"""
+    input = '''<? echo new Foo()::{$var}; '''
+    expected = [
+        Echo([StaticProperty(New('Foo', []), Variable('$var'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_chain():
+    """PHP 8.4: new Foo()::method()->bar()"""
+    input = '''<? new Foo()::method()->bar(); '''
+    expected = [
+        MethodCall(StaticMethodCall(New('Foo', []), 'method', []), 'bar', []),
+    ]
+    eq_ast(input, expected)
+
+def test_new_without_parens_with_args():
+    """PHP 8.4: new Foo($x)::method()"""
+    input = '''<? new Foo($x)::method(); '''
+    expected = [
+        StaticMethodCall(New('Foo', [Parameter(Variable('$x'), False)]), 'method', []),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_short():
+    """PHP 8.4: Property hook with short get"""
+    input = '''<? class Foo { public string $name { get => strtoupper($this->_name); } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$name', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('get', None,
+                                                  FunctionCall('strtoupper', [Parameter(ObjectProperty(Variable('$this'), '_name'), False)]),
+                                                  None, True)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_set_short():
+    """PHP 8.4: Property hooks with get and set (short form)"""
+    input = '''<? class Foo { public int $x { get => $this->_x * 2; set => $this->_x = $value; } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$x', None)],
+                              property_type='int',
+                              hooks=[PropertyHook('get', None,
+                                                  BinaryOp('*', ObjectProperty(Variable('$this'), '_x'), 2),
+                                                  None, True),
+                                     PropertyHook('set', None,
+                                                  Assignment(ObjectProperty(Variable('$this'), '_x'), Variable('$value'), False),
+                                                  None, True)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_get_body():
+    """PHP 8.4: Property hook with body form get"""
+    input = '''<? class Foo { public string $email { get { return $this->_email; } } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$email', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('get', None,
+                                                  [Return(ObjectProperty(Variable('$this'), '_email'))],
+                                                  None, False)])]),
+    ]
+    eq_ast(input, expected)
+
+def test_property_hook_set_with_param():
+    """PHP 8.4: Property hook with set having typed parameter"""
+    input = '''<? class Foo { public string $name { set(string $value) { $this->_name = strtolower($value); } } } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$name', None)],
+                              property_type='string',
+                              hooks=[PropertyHook('set',
+                                                  [FormalParameter('$value', None, False, 'string')],
+                                                  [Assignment(ObjectProperty(Variable('$this'), '_name'),
+                                                              FunctionCall('strtolower', [Parameter(Variable('$value'), False)]),
+                                                              False)],
+                                                  None, False)])]),
+    ]
+    eq_ast(input, expected)

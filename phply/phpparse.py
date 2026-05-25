@@ -710,7 +710,7 @@ def p_trait_statement(p):
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
     elif len(p) == 5:
-        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], lineno=p.lineno(4))
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
     elif len(p) == 3:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     else:
@@ -733,18 +733,24 @@ def p_class_statement(p):
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
-                       | USE fully_qualified_class_name SEMI'''
+                       | USE fully_qualified_class_name SEMI
+                       | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE'''
     if len(p) == 10:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
     elif len(p) == 5:
-        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], lineno=p.lineno(4))
+        p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
     elif len(p) == 4:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
         else:
             p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
+    elif len(p) == 7:
+        # PHP 8.4: Property hooks
+        # variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
+        p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], None, lineno=p.lineno(3))],
+                                   property_type=p[2], hooks=p[5], lineno=p.lineno(4))
     else:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
@@ -794,6 +800,43 @@ def p_interface_list(p):
         p[0] = p[1] + [p[3]]
     else:
         p[0] = [p[1]]
+
+# PHP 8.4: Property Hooks
+def p_property_hook_list(p):
+    '''property_hook_list : property_hook_list property_hook
+                          | property_hook'''
+    if len(p) == 3:
+        p[0] = p[1] + [p[2]]
+    else:
+        p[0] = [p[1]]
+
+def p_property_hook(p):
+    '''property_hook : STRING DOUBLE_ARROW expr SEMI
+                     | STRING LBRACE inner_statement_list RBRACE
+                     | STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+                     | member_modifier STRING DOUBLE_ARROW expr SEMI
+                     | member_modifier STRING LBRACE inner_statement_list RBRACE
+                     | member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE'''
+    if len(p) == 5 and p.slice[2].type == 'DOUBLE_ARROW':
+        # STRING DOUBLE_ARROW expr SEMI (short form, e.g. get => expr;)
+        p[0] = ast.PropertyHook(p[1], None, p[3], None, True)
+    elif len(p) == 5 and p.slice[2].type == 'LBRACE':
+        # STRING LBRACE inner_statement_list RBRACE (body form)
+        p[0] = ast.PropertyHook(p[1], None, p[3], None, False)
+    elif len(p) == 8:
+        # STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[1], p[3], p[6], None, False)
+    elif len(p) == 6 and p.slice[3].type == 'DOUBLE_ARROW':
+        # member_modifier STRING DOUBLE_ARROW expr SEMI
+        p[0] = ast.PropertyHook(p[2], None, p[4], p[1], True)
+    elif len(p) == 6 and p.slice[3].type == 'LBRACE':
+        # member_modifier STRING LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[2], None, p[4], p[1], False)
+    elif len(p) == 9:
+        # member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+        p[0] = ast.PropertyHook(p[2], p[4], p[7], p[1], False)
+
+
 
 def p_interface_extends_list(p):
     '''interface_extends_list : EXTENDS interface_list
@@ -996,6 +1039,17 @@ def p_expr_assign(p):
 def p_expr_new(p):
     'expr : NEW class_name_reference ctor_arguments'
     p[0] = ast.New(p[2], p[3], lineno=p.lineno(1))
+
+# PHP 8.4: new without parentheses
+# Allow new expressions (with or without parentheses) to chain with :: 
+# We add new_expr as a variable_class_name so it works with existing static_member/function_call rules
+def p_variable_class_name_new_expr(p):
+    '''variable_class_name : NEW class_name_reference ctor_arguments
+                           | LPAREN NEW class_name_reference ctor_arguments RPAREN'''
+    if len(p) == 4:
+        p[0] = ast.New(p[2], p[3], lineno=p.lineno(1))
+    else:
+        p[0] = ast.New(p[3], p[4], lineno=p.lineno(2))
 
 def p_expr_objectop(p):
     'expr : expr OBJECT_OPERATOR object_property method_or_not'
