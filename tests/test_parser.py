@@ -1172,3 +1172,98 @@ def test_final_class_constant():
               [ClassConstants([ClassConstant('X', 1)])]),
     ]
     eq_ast(input, expected)
+
+# PHP 8.2 tests
+
+def test_readonly_class():
+    input = '''<? readonly class Foo { public int $x = 1; } '''
+    expected = [
+        Class('Foo', 'readonly', None, [], [],
+              [ClassVariables(['public'], [ClassVariable('$x', 1)], property_type='int')]),
+    ]
+    eq_ast(input, expected)
+
+def test_trait_constants():
+    input = '''<? trait Foo { public const BAR = 'baz'; } '''
+    expected = [
+        Trait('Foo', [], [ClassConstants([ClassConstant('BAR', 'baz')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_true_return_type():
+    input = '''<? function foo(): true {} '''
+    expected = [
+        Function('foo', [], [], False, return_type='true'),
+    ]
+    eq_ast(input, expected)
+
+def test_true_param_type():
+    input = '''<? function bar(true $val): void {} '''
+    expected = [
+        Function('bar', [FormalParameter('$val', None, False, 'true')], [],
+                 False, return_type='void'),
+    ]
+    eq_ast(input, expected)
+
+# PHP 8.3 tests
+
+def test_typed_class_constant():
+    input = '''<? class Foo { public const int MAX_SIZE = 100; } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassConstants([ClassConstant('MAX_SIZE', 100, const_type='int')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_typed_class_constant_no_modifier():
+    input = '''<? class Foo { const string NAME = 'test'; } '''
+    expected = [
+        Class('Foo', None, None, [], [],
+              [ClassConstants([ClassConstant('NAME', 'test', const_type='string')])]),
+    ]
+    eq_ast(input, expected)
+
+def test_dynamic_class_constant_fetch():
+    input = '''<? echo Foo::{$var}; '''
+    expected = [
+        Echo([StaticProperty('Foo', Variable('$var'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_dynamic_class_constant_fetch_expr():
+    input = '''<? echo $obj::{$arr['key']}; '''
+    expected = [
+        Echo([StaticProperty(Variable('$obj'), ArrayOffset(Variable('$arr'), 'key'))]),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_simple():
+    """PHP 8.2: DNF type (A&B)|C"""
+    input = '''<? function foo((A&B)|C $param): (A&B)|C {} '''
+    expected = [
+        Function('foo',
+                 [FormalParameter('$param', None, False, '(A&B)|C')],
+                 [],
+                 False, return_type='(A&B)|C'),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_complex():
+    """PHP 8.2: DNF type (A&B)|(C&D)"""
+    input = '''<? function bar((A&B)|(C&D) $p): (A&B)|(C&D)|null {} '''
+    expected = [
+        Function('bar',
+                 [FormalParameter('$p', None, False, '(A&B)|(C&D)')],
+                 [],
+                 False, return_type='(A&B)|(C&D)|null'),
+    ]
+    eq_ast(input, expected)
+
+def test_dnf_type_nullable():
+    """PHP 8.2: Nullable DNF type ?(A&B)"""
+    input = '''<? function baz(): ?(A&B) {} '''
+    expected = [
+        Function('baz', [], [],
+                 False, return_type='?(A&B)'),
+    ]
+    eq_ast(input, expected)

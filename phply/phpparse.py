@@ -593,7 +593,8 @@ def p_class_declaration_statement(p):
 def p_class_entry_type(p):
     '''class_entry_type : CLASS
                         | ABSTRACT CLASS
-                        | FINAL CLASS'''
+                        | FINAL CLASS
+                        | READONLY CLASS'''
     if len(p) == 3:
         p[0] = p[1].lower()
 
@@ -701,6 +702,7 @@ def p_trait_statement_list(p):
 def p_trait_statement(p):
     '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
+                       | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
                        | USE fully_qualified_class_name SEMI'''
     if len(p) == 10:
@@ -709,6 +711,8 @@ def p_trait_statement(p):
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
     elif len(p) == 5:
         p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], lineno=p.lineno(4))
+    elif len(p) == 3:
+        p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     else:
         if p[1] == 'use':
             p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
@@ -763,13 +767,25 @@ def p_class_variable_declaration_no_initial(p):
 def p_class_constant_declaration(p):
     '''class_constant_declaration : class_constant_declaration COMMA STRING EQUALS static_expr
                                   | CONST STRING EQUALS static_expr
-                                  | non_empty_member_modifiers CONST STRING EQUALS static_expr'''
-    if len(p) == 6 and p.slice[2].type == 'COMMA':
-        p[0] = p[1] + [ast.ClassConstant(p[3], p[5], lineno=p.lineno(2))]
+                                  | non_empty_member_modifiers CONST STRING EQUALS static_expr
+                                  | CONST type_expr STRING EQUALS static_expr
+                                  | non_empty_member_modifiers CONST type_expr STRING EQUALS static_expr'''
+    if len(p) == 6:
+        if p.slice[2].type == 'COMMA':
+            # class_constant_declaration COMMA STRING EQUALS static_expr
+            p[0] = p[1] + [ast.ClassConstant(p[3], p[5], const_type=None, lineno=p.lineno(2))]
+        elif p.slice[1].type == 'CONST':
+            # CONST type_expr STRING EQUALS static_expr
+            p[0] = [ast.ClassConstant(p[3], p[5], const_type=p[2], lineno=p.lineno(1))]
+        else:
+            # non_empty_member_modifiers CONST STRING EQUALS static_expr (no type)
+            p[0] = [ast.ClassConstant(p[3], p[5], const_type=None, lineno=p.lineno(2))]
+    elif len(p) == 7:
+        # non_empty_member_modifiers CONST type_expr STRING EQUALS static_expr
+        p[0] = [ast.ClassConstant(p[4], p[6], const_type=p[3], lineno=p.lineno(2))]
     elif len(p) == 5:
-        p[0] = [ast.ClassConstant(p[2], p[4], lineno=p.lineno(1))]
-    else:
-        p[0] = [ast.ClassConstant(p[3], p[5], lineno=p.lineno(2))]
+        # CONST STRING EQUALS static_expr (no type)
+        p[0] = [ast.ClassConstant(p[2], p[4], const_type=None, lineno=p.lineno(1))]
 
 def p_interface_list(p):
     '''interface_list : interface_list COMMA fully_qualified_class_name
@@ -878,6 +894,11 @@ def p_type_expr_union(p):
 def p_type_expr_intersection(p):
     'type_expr : type_expr AND type_expr'
     p[0] = p[1] + "&" + p[3]
+
+# PHP 8.2: DNF types - parenthesized type (for intersection groups in unions)
+def p_type_expr_dnf(p):
+    'type_expr : LPAREN type_expr RPAREN'
+    p[0] = "(" + p[2] + ")"
 
 def p_optional_return_type(p):
     '''optional_return_type : COLON type_expr
