@@ -7,7 +7,7 @@ Supports PHP **5.6 through 8.5** syntax.
 ## Installation
 
 ```bash
-pip install phply
+pip install lphply
 ```
 
 ## Usage
