@@ -76,6 +76,7 @@ Block = node('Block', ['nodes'])
 Assignment = node('Assignment', ['node', 'expr', 'is_ref'])
 ListAssignment = node('ListAssignment', ['nodes', 'expr'])
 New = node('New', ['name', 'params'])
+AnonymousClass = node('AnonymousClass', ['extends', 'implements', 'traits', 'nodes', 'params'])
 Clone = node('Clone', ['node'])
 # PHP 8.5: Clone With
 CloneWith = node('CloneWith', ['node', 'properties'])
