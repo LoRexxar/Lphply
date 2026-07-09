@@ -1096,8 +1096,33 @@ def p_expr_nullsafe_objectop(p):
 
 def p_class_name_reference(p):
     '''class_name_reference : class_name
-                            | dynamic_class_name_reference'''
+                            | dynamic_class_name_reference
+                            | anonymous_class'''
     p[0] = p[1]
+
+def p_anonymous_class(p):
+    '''anonymous_class : CLASS extends_from implements_list LBRACE class_statement_list RBRACE ctor_arguments
+                       | CLASS LPAREN function_call_parameter_list RPAREN LBRACE class_statement_list RBRACE ctor_arguments'''
+    if len(p) == 8:
+        # CLASS extends_from implements_list LBRACE class_statement_list RBRACE ctor_arguments
+        traits = []
+        stmts = []
+        for s in p[5]:
+            if isinstance(s, ast.TraitUse):
+                traits.append(s)
+            else:
+                stmts.append(s)
+        p[0] = ast.AnonymousClass(p[2], p[3], traits, stmts, p[7], lineno=p.lineno(1))
+    else:
+        # CLASS LPAREN function_call_parameter_list RPAREN LBRACE class_statement_list RBRACE ctor_arguments
+        traits = []
+        stmts = []
+        for s in p[6]:
+            if isinstance(s, ast.TraitUse):
+                traits.append(s)
+            else:
+                stmts.append(s)
+        p[0] = ast.AnonymousClass(None, None, traits, stmts, p[8], lineno=p.lineno(1))
 
 def p_class_name(p):
     '''class_name : namespace_name
