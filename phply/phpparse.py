@@ -1320,9 +1320,13 @@ def p_function_call_first_class_callable_static(p):
 
 def p_method_or_not(p):
     '''method_or_not : LPAREN function_call_parameter_list RPAREN
+                     | LPAREN ELLIPSIS RPAREN
                      | empty'''
     if len(p) == 4:
-        p[0] = p[2]
+        if p.slice[2].type == 'ELLIPSIS':
+            p[0] = [ast.Parameter(ast.FirstClassCallable(None, lineno=p.lineno(2)), False)]
+        else:
+            p[0] = p[2]
 
 def p_variable_properties(p):
     '''variable_properties : variable_properties variable_property
