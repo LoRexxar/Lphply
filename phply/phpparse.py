@@ -1516,8 +1516,12 @@ def p_function_call_parameter_named_ref(p):
     p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
 
 def p_expr_function(p):
-    'expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE'
-    p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
+    '''expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE
+            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE'''
+    if len(p) == 10:
+        p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
+    else:
+        p[0] = ast.Closure(p[5], p[7], p[9], p[3], lineno=p.lineno(1))
 
 def p_lexical_vars(p):
     '''lexical_vars : USE LPAREN lexical_var_list RPAREN
@@ -1562,8 +1566,12 @@ def p_function_call_parameter_ellipsis(p):
     p[0] = ast.Parameter(p[2], False, lineno=p.lineno(1))
 
 def p_expr_arrow_function(p):
-    '''expr : FN is_reference LPAREN parameter_list RPAREN optional_return_type DOUBLE_ARROW expr'''
-    p[0] = ast.ArrowFunction(p[4], p[8], p[6], p[2], lineno=p.lineno(1))
+    '''expr : FN is_reference LPAREN parameter_list RPAREN optional_return_type DOUBLE_ARROW expr
+            | STATIC FN is_reference LPAREN parameter_list RPAREN optional_return_type DOUBLE_ARROW expr'''
+    if len(p) == 9:
+        p[0] = ast.ArrowFunction(p[4], p[8], p[6], p[2], lineno=p.lineno(1))
+    else:
+        p[0] = ast.ArrowFunction(p[5], p[9], p[7], p[3], lineno=p.lineno(1))
 
 def p_expr_binary_op(p):
     '''expr : expr BOOLEAN_AND expr
