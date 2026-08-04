@@ -150,8 +150,13 @@ def p_top_statement_constant(p):
     p[0] = ast.ConstantDeclarations(p[2], lineno=p.lineno(1))
 
 def p_top_statement_use(p):
-    'top_statement : USE use_declarations SEMI'
-    p[0] = ast.UseDeclarations(p[2], lineno=p.lineno(1))
+    '''top_statement : USE use_declarations SEMI
+                     | USE FUNCTION use_declarations SEMI
+                     | USE CONST use_declarations SEMI'''
+    if len(p) == 4:
+        p[0] = ast.UseDeclarations(p[2], lineno=p.lineno(1))
+    else:
+        p[0] = ast.UseDeclarations(p[3], lineno=p.lineno(1))
 
 def p_use_declarations(p):
     '''use_declarations : use_declarations COMMA use_declaration
