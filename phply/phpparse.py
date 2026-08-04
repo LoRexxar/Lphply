@@ -309,8 +309,8 @@ def p_statement_try(p):
     p[0] = ast.Try(p[3], p[5], p[6], lineno=p.lineno(1))
 
 def p_additional_catches(p):
-    '''additional_catches : additional_catches CATCH LPAREN fully_qualified_class_name VARIABLE RPAREN LBRACE inner_statement_list RBRACE
-                          | additional_catches CATCH LPAREN fully_qualified_class_name RPAREN LBRACE inner_statement_list RBRACE
+    '''additional_catches : additional_catches CATCH LPAREN catch_type_list VARIABLE RPAREN LBRACE inner_statement_list RBRACE
+                          | additional_catches CATCH LPAREN catch_type_list RPAREN LBRACE inner_statement_list RBRACE
                           | empty'''
     if len(p) == 10:
         p[0] = p[1] + [ast.Catch(p[4], ast.Variable(p[5], lineno=p.lineno(5)),
@@ -319,6 +319,14 @@ def p_additional_catches(p):
         p[0] = p[1] + [ast.Catch(p[4], None, p[7], lineno=p.lineno(2))]
     else:
         p[0] = []
+
+def p_catch_type_list(p):
+    '''catch_type_list : catch_type_list OR fully_qualified_class_name
+                       | fully_qualified_class_name'''
+    if len(p) == 4:
+        p[0] = p[1] + ' | ' + p[3]
+    else:
+        p[0] = p[1]
 
 def p_maybe_finally(p):
     '''maybe_finally : FINALLY LBRACE inner_statement_list RBRACE
