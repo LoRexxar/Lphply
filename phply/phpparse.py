@@ -1458,6 +1458,14 @@ def p_non_empty_array_pair_list_leading_comma(p):
     else:
         p[0] = [None, ast.ArrayElement(None, p[3], True, lineno=p.lineno(1))]
 
+def p_non_empty_array_pair_list_spread(p):
+    'non_empty_array_pair_list : non_empty_array_pair_list COMMA ELLIPSIS expr'
+    p[0] = p[1] + [ast.ArrayElement(None, p[4], True, lineno=p.lineno(2))]
+
+def p_non_empty_array_pair_list_spread_single(p):
+    'non_empty_array_pair_list : ELLIPSIS expr'
+    p[0] = [ast.ArrayElement(None, p[2], True, lineno=p.lineno(1))]
+
 def p_non_empty_array_pair_list_pair(p):
     '''non_empty_array_pair_list : non_empty_array_pair_list COMMA expr DOUBLE_ARROW AND variable
                                  | non_empty_array_pair_list COMMA expr DOUBLE_ARROW expr
