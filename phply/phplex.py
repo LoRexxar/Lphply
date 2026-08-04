@@ -35,7 +35,7 @@ reserved = (
     'REQUIRE_ONCE', 'RETURN', 'STATIC', 'SWITCH', 'UNSET', 'USE', 'VAR',
     'WHILE', 'FINAL', 'INTERFACE', 'IMPLEMENTS', 'PUBLIC', 'PRIVATE',
     'PROTECTED', 'ABSTRACT', 'CLONE', 'TRY', 'CATCH', 'THROW', 'NAMESPACE',
-    'FINALLY', 'TRAIT', 'YIELD', 'FN',
+    'FINALLY', 'TRAIT', 'YIELD', 'FN', 'GOTO',
     # PHP 8.0
     'MATCH', 'MIXED',
     # PHP 8.1
@@ -317,11 +317,15 @@ def t_php_VARIABLE(t):
 # Floating literal
 def t_php_DNUMBER(t):
     r'(\d*\.\d+|\d+\.\d*)([Ee][+-]?\d+)? | (\d+[Ee][+-]?\d+)'
+    if isinstance(t.value, str):
+        t.value = t.value.replace('_', '')
     return t
 
 # Integer literal
 def t_php_LNUMBER(t):
-    r'(0[bB][01]+)|(0[xX][0-9A-Fa-f]+)|\d+'
+    r'(0[bB][01]+)|(0[xX][0-9A-Fa-f]+)|\d[\d_]*'
+    if isinstance(t.value, str):
+        t.value = t.value.replace('_', '')
     return t
 
 # String literal
