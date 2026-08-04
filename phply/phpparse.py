@@ -210,11 +210,14 @@ def p_inner_statement(p):
 
 def p_inner_statement_yield(p):
     '''inner_statement : YIELD SEMI
-                       | YIELD expr SEMI'''
+                       | YIELD expr SEMI
+                       | YIELD expr DOUBLE_ARROW expr SEMI'''
     if len(p) == 3:
-        p[0] = ast.Yield(None, lineno=p.lineno(1))
+        p[0] = ast.Yield(None, None, lineno=p.lineno(1))
+    elif len(p) == 4:
+        p[0] = ast.Yield(None, p[2], lineno=p.lineno(1))
     else:
-        p[0] = ast.Yield(p[2], lineno=p.lineno(1))
+        p[0] = ast.Yield(p[2], p[4], lineno=p.lineno(1))
 
 def p_statement_block(p):
     'statement : LBRACE inner_statement_list RBRACE'
