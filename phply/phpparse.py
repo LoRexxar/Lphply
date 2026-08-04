@@ -343,6 +343,14 @@ def p_statement_throw(p):
     'statement : THROW expr SEMI'
     p[0] = ast.Throw(p[2], lineno=p.lineno(1))
 
+def p_statement_goto(p):
+    'statement : GOTO STRING SEMI'
+    p[0] = ast.Goto(p[2], lineno=p.lineno(1))
+
+def p_statement_label(p):
+    'inner_statement : STRING COLON'
+    p[0] = ast.Label(p[1], lineno=p.lineno(1))
+
 def p_expr_throw(p):
     'expr : THROW expr'
     p[0] = ast.Throw(p[2], lineno=p.lineno(1))
