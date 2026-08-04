@@ -1334,9 +1334,14 @@ def p_static_member(p):
     '''static_member : class_name DOUBLE_COLON variable_without_objects
                      | variable_class_name DOUBLE_COLON variable_without_objects
                      | class_name DOUBLE_COLON LBRACE expr RBRACE
-                     | variable_class_name DOUBLE_COLON LBRACE expr RBRACE'''
+                     | variable_class_name DOUBLE_COLON LBRACE expr RBRACE
+                     | class_name DOUBLE_COLON CLASS
+                     | variable_class_name DOUBLE_COLON CLASS'''
     if len(p) == 4:
-        p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
+        if p.slice[3].type == 'CLASS':
+            p[0] = ast.Constant('::class', lineno=p.lineno(3))
+        else:
+            p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
     else:
         p[0] = ast.StaticProperty(p[1], p[4], lineno=p.lineno(2))
 
