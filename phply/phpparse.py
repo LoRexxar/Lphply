@@ -584,8 +584,15 @@ def p_unset_variable(p):
     'unset_variable : variable'
     p[0] = p[1]
 
+def p_identifier_or_reserved(p):
+    '''identifier_or_reserved : STRING
+                              | LIST
+                              | CLASS
+                              | CONST'''
+    p[0] = p[1]
+
 def p_function_declaration_statement(p):
-    'function_declaration_statement : FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type LBRACE inner_statement_list RBRACE'
+    'function_declaration_statement : FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type LBRACE inner_statement_list RBRACE'
     p[0] = ast.Function(p[3], p[5], p[9], p[2], return_type=p[7], lineno=p.lineno(1))
 
 def p_class_declaration_statement(p):
@@ -657,7 +664,7 @@ def p_enum_statement_list(p):
 
 def p_enum_statement(p):
     '''enum_statement : enum_constant SEMI
-                      | method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+                      | method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
                       | USE fully_qualified_class_name SEMI
                       | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE'''
     if p.slice[1].type == 'enum_constant':
@@ -741,7 +748,7 @@ def p_trait_statement_list(p):
         p[0] = []
 
 def p_trait_statement(p):
-    '''trait_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+    '''trait_statement : method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
@@ -770,7 +777,7 @@ def p_class_statement_list(p):
         p[0] = []
 
 def p_class_statement(p):
-    '''class_statement : method_modifiers FUNCTION is_reference STRING LPAREN parameter_list RPAREN optional_return_type method_body
+    '''class_statement : method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
