@@ -1197,6 +1197,19 @@ def p_expr_list_assign(p):
     'expr : LIST LPAREN assignment_list RPAREN EQUALS expr'
     p[0] = ast.ListAssignment(p[3], p[6], lineno=p.lineno(1))
 
+def p_expr_array_destructuring_assign(p):
+    'expr : array_literal EQUALS expr'
+    arr = p[1]
+    nodes = []
+    for elem in (arr.nodes or []):
+        if elem is None:
+            nodes.append(None)
+        elif isinstance(elem, ast.ArrayElement):
+            nodes.append(elem.value)
+        else:
+            nodes.append(elem)
+    p[0] = ast.ListAssignment(nodes, p[3], lineno=p.lineno(2))
+
 def p_assignment_list(p):
     '''assignment_list : assignment_list COMMA assignment_list_element
                        | assignment_list_element'''
@@ -1402,13 +1415,18 @@ def p_expr_scalar(p):
 
 def p_expr_array(p):
     '''expr : ARRAY LPAREN array_pair_list RPAREN
-            | LBRACKET array_pair_list RBRACKET'''
+            | array_literal'''
     if len(p) == 5:
         contents = p[3]
     else:
-        contents = p[2]
+        p[0] = p[1]
+        return
 
     p[0] = ast.Array(contents, lineno=p.lineno(1))
+
+def p_array_literal(p):
+    'array_literal : LBRACKET array_pair_list RBRACKET'
+    p[0] = ast.Array(p[2], lineno=p.lineno(1))
 
 def p_array_pair_list(p):
     '''array_pair_list : empty
@@ -1431,6 +1449,14 @@ def p_non_empty_array_pair_list_item(p):
         p[0] = [ast.ArrayElement(None, p[2], True, lineno=p.lineno(1))]
     else:
         p[0] = [ast.ArrayElement(None, p[1], False, lineno=p.lineno(1))]
+
+def p_non_empty_array_pair_list_leading_comma(p):
+    '''non_empty_array_pair_list : COMMA expr
+                                 | COMMA AND variable'''
+    if len(p) == 3:
+        p[0] = [None, ast.ArrayElement(None, p[2], False, lineno=p.lineno(1))]
+    else:
+        p[0] = [None, ast.ArrayElement(None, p[3], True, lineno=p.lineno(1))]
 
 def p_non_empty_array_pair_list_pair(p):
     '''non_empty_array_pair_list : non_empty_array_pair_list COMMA expr DOUBLE_ARROW AND variable
