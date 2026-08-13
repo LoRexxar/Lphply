@@ -1108,22 +1108,35 @@ def p_variable_class_name_new_expr(p):
 def p_expr_objectop(p):
     'expr : expr OBJECT_OPERATOR object_property method_or_not'
     name, _dims = p[3]
-    assert _dims == []
+    # _dims may be non-empty for syntax like (new Foo())->bar[$key]
+    # where object_property captures the array offset. Gracefully handle
+    # by wrapping the property access in ArrayOffset/StringOffset nodes.
     params = p[4]
     if params is not None:
-        p[0] = ast.MethodCall(p[1], name, params, lineno=p.lineno(3))
+        result = ast.MethodCall(p[1], name, params, lineno=p.lineno(3))
     else:
-        p[0] = ast.ObjectProperty(p[1], name, lineno=p.lineno(3))
+        result = ast.ObjectProperty(p[1], name, lineno=p.lineno(3))
+    for dim_type, dim_value, dim_lineno in _dims:
+        if dim_type is ast.ArrayOffset:
+            result = ast.ArrayOffset(result, dim_value, lineno=dim_lineno)
+        else:
+            result = ast.StringOffset(result, dim_value, lineno=dim_lineno)
+    p[0] = result
 
 def p_expr_nullsafe_objectop(p):
     'expr : expr NULLSAFE_OBJECT_OPERATOR object_property method_or_not'
     name, _dims = p[3]
-    assert _dims == []
     params = p[4]
     if params is not None:
-        p[0] = ast.NullsafeMethodCall(p[1], name, params, lineno=p.lineno(3))
+        result = ast.NullsafeMethodCall(p[1], name, params, lineno=p.lineno(3))
     else:
-        p[0] = ast.NullsafeProperty(p[1], name, lineno=p.lineno(3))
+        result = ast.NullsafeProperty(p[1], name, lineno=p.lineno(3))
+    for dim_type, dim_value, dim_lineno in _dims:
+        if dim_type is ast.ArrayOffset:
+            result = ast.ArrayOffset(result, dim_value, lineno=dim_lineno)
+        else:
+            result = ast.StringOffset(result, dim_value, lineno=dim_lineno)
+    p[0] = result
 
 def p_class_name_reference(p):
     '''class_name_reference : class_name
