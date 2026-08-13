@@ -961,9 +961,9 @@ def test_yield():
     input = '''<? function f() { yield; yield 1; }'''
     expected = [
         Function('f', [], [
-            Yield(None),
-            Yield(1),
-        ], False),
+            Yield(None, None),
+            Yield(None, 1),
+        ], False, None),
     ]
     eq_ast(input, expected)
 

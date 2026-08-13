@@ -1394,7 +1394,12 @@ def p_static_member(p):
                      | variable_class_name DOUBLE_COLON CLASS'''
     if len(p) == 4:
         if p.slice[3].type == 'CLASS':
-            p[0] = ast.Constant('::class', lineno=p.lineno(3))
+            # A::class evaluates to the string 'A' in PHP;
+            # for dynamic class names ($x::class), use MagicConstant
+            if hasattr(p[1], 'name') and not isinstance(p[1], str):
+                p[0] = ast.MagicConstant('::class', p[1], lineno=p.lineno(3))
+            else:
+                p[0] = p[1]
         else:
             p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
     else:
