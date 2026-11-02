@@ -1310,6 +1310,8 @@ def p_function_call_static(p):
                      | variable_class_name DOUBLE_COLON STRING LPAREN function_call_parameter_list RPAREN
                      | variable_class_name DOUBLE_COLON variable_without_objects LPAREN function_call_parameter_list RPAREN
                      | class_name DOUBLE_COLON reserved_method_name LPAREN function_call_parameter_list RPAREN
+                     | class_name DOUBLE_COLON MATCH LPAREN function_call_parameter_list RPAREN
+                     | variable_class_name DOUBLE_COLON MATCH LPAREN function_call_parameter_list RPAREN
                      | variable_class_name DOUBLE_COLON reserved_method_name LPAREN function_call_parameter_list RPAREN'''
     p[0] = ast.StaticMethodCall(p[1], p[3], p[5], lineno=p.lineno(2))
 
@@ -1391,7 +1393,11 @@ def p_static_member(p):
                      | class_name DOUBLE_COLON LBRACE expr RBRACE
                      | variable_class_name DOUBLE_COLON LBRACE expr RBRACE
                      | class_name DOUBLE_COLON CLASS
-                     | variable_class_name DOUBLE_COLON CLASS'''
+                     | variable_class_name DOUBLE_COLON CLASS
+                     | class_name DOUBLE_COLON MATCH
+                     | variable_class_name DOUBLE_COLON MATCH'''
+    # Fix 52-4b: Class::match(...) — 'match' is a valid static method
+    # name (Route::match); the lexer tokenizes it as MATCH.
     if len(p) == 4:
         if p.slice[3].type == 'CLASS':
             # A::class evaluates to the string 'A' in PHP;
@@ -1411,6 +1417,13 @@ def p_variable_class_name(p):
 
 def p_variable_array_offset(p):
     'variable : variable LBRACKET dim_offset RBRACKET'
+    p[0] = ast.ArrayOffset(p[1], p[3], lineno=p.lineno(2))
+
+def p_variable_class_constant_offset(p):
+    # Fix 52: Class::CONST['key'] — class-constant array dereference
+    # (PHP 5.5+). class_constant is a scalar here, so the plain
+    # variable-offset rule cannot reach it; wrap as ArrayOffset(StaticProperty)
+    'variable : class_constant LBRACKET dim_offset RBRACKET'
     p[0] = ast.ArrayOffset(p[1], p[3], lineno=p.lineno(2))
 
 def p_reference_variable_array_offset(p):
@@ -1470,6 +1483,12 @@ def p_variable_name(p):
     else:
         p[0] = p[2]
 
+def p_variable_name_match(p):
+    # Fix 52-4: 'match' is a valid method/member name (Route::match) —
+    # the lexer emits MATCH for it, so allow it where a name is expected.
+    'variable_name : MATCH'
+    p[0] = 'match'
+
 def p_variable_without_objects(p):
     'variable_without_objects : simple_indirect_reference'
     p[0] = p[1]
@@ -1500,6 +1519,17 @@ def p_array_pair_list(p):
         p[0] = []
     else:
         p[0] = p[1]
+
+def p_non_empty_array_pair_list_hole(p):
+    # Fix 52-6: destructuring holes - [$a, , $b] (PHP 7.1+).  Emit None
+    # for empty slots, same as the leading-comma rule.
+    '''non_empty_array_pair_list : non_empty_array_pair_list COMMA
+                                 | COMMA'''
+    if len(p) == 3:
+        p[0] = p[1] + [None]
+    else:
+        p[0] = [None]
+
 
 def p_non_empty_array_pair_list_item(p):
     '''non_empty_array_pair_list : non_empty_array_pair_list COMMA AND variable
@@ -1558,6 +1588,12 @@ def p_function_call_parameter_list(p):
     else:
         p[0] = [p[1]]
 
+def p_function_call_parameter_list_trailing_comma(p):
+    # Fix 52b: trailing comma in call arguments (PHP 7.3+):
+    # f($a, $b,) — the list ends with COMMA before RPAREN.
+    '''function_call_parameter_list : function_call_parameter_list COMMA'''
+    p[0] = p[1]
+
 def p_function_call_parameter_list_empty(p):
     'function_call_parameter_list : empty'
     p[0] = []
@@ -1582,9 +1618,16 @@ def p_function_call_parameter_named_ref(p):
 
 def p_expr_function(p):
     '''expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE
-            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE'''
+            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE
+            | FUNCTION is_reference LPAREN parameter_list RPAREN optional_return_type lexical_vars LBRACE inner_statement_list RBRACE
+            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN optional_return_type lexical_vars LBRACE inner_statement_list RBRACE'''
+    # Fix 52-3: closures may declare a return type (function (): void {}).
     if len(p) == 10:
         p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
+    elif len(p) == 11:
+        p[0] = ast.Closure(p[4], p[7], p[9], p[2], lineno=p.lineno(1))
+    elif len(p) == 12:
+        p[0] = ast.Closure(p[5], p[8], p[10], p[3], lineno=p.lineno(1))
     else:
         p[0] = ast.Closure(p[5], p[7], p[9], p[3], lineno=p.lineno(1))
 
