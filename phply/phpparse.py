@@ -588,7 +588,10 @@ def p_identifier_or_reserved(p):
     '''identifier_or_reserved : STRING
                               | LIST
                               | CLASS
-                              | CONST'''
+                              | CONST
+                              | NEW
+                              | ECHO
+                              | PRINT'''
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
@@ -1073,9 +1076,45 @@ def p_parameter_promoted(p):
                  | visibility_modifier QUESTION type_expr VARIABLE
                  | visibility_modifier QUESTION type_expr AND VARIABLE
                  | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
-    # Strip visibility modifier and parse the rest as a normal parameter
-    shifted = [None] + list(p)[2:]
+                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY VARIABLE
+                 | visibility_modifier READONLY type_expr VARIABLE
+                 | visibility_modifier READONLY type_expr AND VARIABLE
+                 | visibility_modifier READONLY VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY QUESTION type_expr VARIABLE
+                 | visibility_modifier READONLY QUESTION type_expr AND VARIABLE
+                 | visibility_modifier READONLY QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier VARIABLE
+                 | READONLY visibility_modifier type_expr VARIABLE
+                 | READONLY visibility_modifier type_expr AND VARIABLE
+                 | READONLY visibility_modifier VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier type_expr VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier QUESTION type_expr VARIABLE
+                 | READONLY visibility_modifier QUESTION type_expr AND VARIABLE
+                 | READONLY visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY type_expr VARIABLE
+                 | READONLY type_expr AND VARIABLE
+                 | READONLY VARIABLE
+                 | READONLY type_expr VARIABLE EQUALS static_scalar
+                 | READONLY type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY QUESTION type_expr VARIABLE
+                 | READONLY QUESTION type_expr AND VARIABLE
+                 | READONLY QUESTION type_expr VARIABLE EQUALS static_scalar
+                 | READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+    # Strip visibility/readonly modifiers and parse the rest as a normal parameter.
+    # readonly is promoted-property-only in PHP 8.1, so dropping it here is safe:
+    # the param still records visibility via _parse_parameter(parts).
+    first_tok = 1
+    parts = list(p)
+    while first_tok < len(parts) - 1 and isinstance(parts[first_tok], str) and parts[first_tok].lower() in (
+            'public', 'protected', 'private', 'readonly'):
+        first_tok += 1
+    shifted = [None] + parts[first_tok:]
     p[0] = _parse_parameter(shifted, p.lineno(1))
 
 def p_expr_variable(p):
@@ -2089,14 +2128,31 @@ def p_static_expr_group(p):
     'static_expr : LPAREN static_expr RPAREN'
     p[0] = p[2]
 
+# Soft-reserved words that remain legal as namespace segments / class names
+# (PHP only hard-reserves class names list, not enum/trait/etc. in namespaces).
+SOFT_RESERVED_IN_NAMES = ('ENUM', 'TRAIT', 'MATCH', 'MIXED', 'READONLY', 'NEVER', 'LIST', 'ARRAY')
+
 def p_namespace_name(p):
     '''namespace_name : namespace_name NS_SEPARATOR STRING
+                      | namespace_name NS_SEPARATOR soft_reserved_name
                       | STRING
-                      | ARRAY'''
+                      | soft_reserved_name'''
     if len(p) == 4:
         p[0] = p[1] + p[2] + p[3]
     else:
         p[0] = p[1]
+
+
+def p_soft_reserved_name(p):
+    '''soft_reserved_name : ENUM
+                          | TRAIT
+                          | MATCH
+                          | MIXED
+                          | READONLY
+                          | NEVER
+                          | LIST
+                          | ARRAY'''
+    p[0] = p[1]
 
 def p_encaps_list(p):
     '''encaps_list : encaps_list encaps_var

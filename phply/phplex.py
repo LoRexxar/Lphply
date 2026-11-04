@@ -259,7 +259,33 @@ def t_php_DOC_COMMENT(t):
 
 def t_php_COMMENT(t):
     r'/\*(.|\n)*?\*/ | //([^?%\n]|[?%](?!>))*\n? | \#([^?%\n]|[?%](?!>))*\n?'
-    t.lexer.lineno += t.value.count("\n")
+    # PHP 8 attributes: '#[' must NOT be treated as a comment. Real attribute
+    # lexing is out of scope; consume the whole attribute block (balanced
+    # brackets up to the matching ']') and emit it as a comment so multi-line
+    # attributes #[AsCommand(\n  "a",\n  "b"\n)] don't leak string tokens.
+    if t.value.startswith('#['):
+        # t.lexer.lexpos already points PAST the matched text; the attribute
+        # actually starts at lexpos - len(t.value).
+        pos = t.lexer.lexpos - len(t.value)
+        src = t.lexer.lexdata
+        j = pos + 2  # skip '#['
+        depth = 1
+        while j < len(src):
+            c = src[j]
+            if c == '[':
+                depth += 1
+            elif c == ']':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        # consume up to ']' inclusive; look ahead for ')' of '#[Name(...)]'
+        end = j + 1
+        if depth == 0 and end < len(src) and src[end] == ')':
+            end += 1
+        t.value = src[pos:end]
+        t.lexer.lexpos = end
+        t.lexer.lineno += t.value.count("\n")
     return t
 
 # Escaping from HTML
