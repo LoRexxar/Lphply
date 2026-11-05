@@ -1184,7 +1184,8 @@ def p_parameter_promoted(p):
     parts = list(p)
     # Fix 54: constructor-promotion WITH property hooks — drop the
     # `LBRACE property_hook_list RBRACE` tail before delegating.
-    if p.slice[len(p) - 2].type == 'RBRACE' and p.slice[len(p) - 3].type == 'property_hook_list':
+    # p.slice indexes 0..len(p)-1; the last symbol is at len(p)-1.
+    if p.slice[len(p) - 1].type == 'RBRACE' and p.slice[len(p) - 2].type == 'property_hook_list':
         parts = parts[:-3]
     while first_tok < len(parts) - 1 and isinstance(parts[first_tok], str) and parts[first_tok].lower() in (
             'public', 'protected', 'private', 'readonly'):
