@@ -591,6 +591,12 @@ def p_unset_variables(p):
     else:
         p[0] = [p[1]]
 
+def p_unset_variables_trailing_comma(p):
+    # Fix 56 (corpus gate, smf): `unset($a, $b,)` — trailing comma in
+    # unset() lists (PHP 7.3+, same relaxation as call arguments).
+    'unset_variables : unset_variables COMMA'
+    p[0] = p[1]
+
 def p_unset_variable(p):
     'unset_variable : variable'
     p[0] = p[1]
@@ -691,15 +697,18 @@ def p_enum_statement_list(p):
 def p_enum_statement(p):
     '''enum_statement : enum_constant SEMI
                       | method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
-                      | USE fully_qualified_class_name SEMI
-                      | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE'''
+                      | USE use_declarations SEMI
+                      | USE use_declarations LBRACE trait_modifiers_list RBRACE'''
     if p.slice[1].type == 'enum_constant':
         p[0] = p[1]
     elif p.slice[1].type == 'USE':
+        _names = p[2]
+        if isinstance(_names, list):
+            _names = ', '.join(getattr(d, 'name', str(d)) for d in _names)
         if len(p) == 4:
-            p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
+            p[0] = ast.TraitUse(_names, [], lineno=p.lineno(1))
         else:
-            p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+            p[0] = ast.TraitUse(_names, p[4], lineno=p.lineno(1))
     else:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
 
@@ -753,8 +762,23 @@ def p_trait_member(p):
         p[0] = p[1]
 
 def p_trait_modifier(p):
-    'trait_modifier : trait_member AS STRING SEMI'
-    p[0] = ast.TraitModifier(p[1], p[3], None)
+    '''trait_modifier : trait_member AS STRING SEMI
+                      | trait_member STRING insteadof_list SEMI'''
+    # Fix 56: `T1::m insteadof T2;` / `T1::m insteadof T2, T3;` — conflict
+    # resolution.  `insteadof` is not a lexer token (lexed as STRING), so
+    # the keyword itself arrives as p[2] and the targets follow.
+    if len(p) == 5 and str(p[2]).lower() == 'insteadof':
+        p[0] = ast.TraitModifier(p[1], None, None)
+    else:
+        p[0] = ast.TraitModifier(p[1], p[3], None)
+
+def p_insteadof_list(p):
+    '''insteadof_list : insteadof_list COMMA trait_member
+                      | trait_member'''
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    else:
+        p[0] = [p[1]]
 
 def p_trait_modifier_with_visibility(p):
     '''trait_modifier : trait_member AS visibility_modifier STRING SEMI
@@ -777,11 +801,27 @@ def p_trait_statement(p):
     '''trait_statement : method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
-                       | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
-                       | USE fully_qualified_class_name SEMI
+                       | USE use_declarations LBRACE trait_modifiers_list RBRACE
+                       | USE use_declarations SEMI
                        | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
                        | variable_modifiers optional_property_type VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
-    # Fix 54: traits carry property hooks too (HasSongFields in the
+    # Fix 56 (corpus gate, pagekit): `use StaticTrait, EventTrait;` —
+    # multi-trait comma list. use_declarations already supports the
+    # comma list + AS aliases (top_statement reuses it).  A block form
+    # after a comma list is not legal PHP, so trait_modifiers_list with
+    # multiple traits is tolerated but only meaningful for the
+    # single-trait spelling.
+    if p.slice[1].type == 'USE':
+        names = p[2]
+        if isinstance(names, list):
+            # keep TraitUse.name a string for downstream consumers:
+            # join multi-trait lists; aliases are preserved per-declaration.
+            names = ', '.join(getattr(d, 'name', str(d)) for d in names)
+        if len(p) == 6:
+            p[0] = ast.TraitUse(names, p[4], lineno=p.lineno(1))
+        else:
+            p[0] = ast.TraitUse(names, [], lineno=p.lineno(1))
+        return
     # CVE-2026-121429 corpus) — mirror the class_statement productions.
     if len(p) == 10:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
@@ -818,19 +858,26 @@ def p_class_statement(p):
     '''class_statement : method_modifiers FUNCTION is_reference identifier_or_reserved LPAREN parameter_list RPAREN optional_return_type method_body
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
-                       | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
-                       | USE fully_qualified_class_name SEMI
+                       | USE use_declarations LBRACE trait_modifiers_list RBRACE
+                       | USE use_declarations SEMI
                        | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
                        | variable_modifiers optional_property_type VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
     if len(p) == 10:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
-        p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
+        # Fix 56: use_declarations is a list; keep TraitUse.name a string.
+        _names = p[2]
+        if isinstance(_names, list):
+            _names = ', '.join(getattr(d, 'name', str(d)) for d in _names)
+        p[0] = ast.TraitUse(_names, p[4], lineno=p.lineno(1))
     elif len(p) == 5:
         p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
     elif len(p) == 4:
         if p[1] == 'use':
-            p[0] = ast.TraitUse(p[2], [], lineno=p.lineno(1))
+            _names = p[2]
+            if isinstance(_names, list):
+                _names = ', '.join(getattr(d, 'name', str(d)) for d in _names)
+            p[0] = ast.TraitUse(_names, [], lineno=p.lineno(1))
         else:
             p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     elif len(p) == 7:
@@ -847,8 +894,8 @@ def p_class_statement(p):
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
 def p_class_variable_declaration_initial(p):
-    '''class_variable_declaration : class_variable_declaration COMMA VARIABLE EQUALS static_scalar
-                                  | VARIABLE EQUALS static_scalar'''
+    '''class_variable_declaration : class_variable_declaration COMMA VARIABLE EQUALS static_expr
+                                  | VARIABLE EQUALS static_expr'''
     if len(p) == 6:
         p[0] = p[1] + [ast.ClassVariable(p[3], p[5], lineno=p.lineno(2))]
     else:
@@ -1814,7 +1861,19 @@ def p_function_call_parameter_named(p):
                                | MATCH COLON expr
                                | ENUM COLON expr
                                | FN COLON expr
-                               | FROM COLON expr'''
+                               | FROM COLON expr
+                               | VAR COLON expr
+                               | FUNCTION COLON expr
+                               | CONST COLON expr
+                               | UNSET COLON expr
+                               | ISSET COLON expr
+                               | EMPTY COLON expr
+                               | NEW COLON expr
+                               | CLONE COLON expr
+                               | ECHO COLON expr
+                               | PRINT COLON expr
+                               | MIXED COLON expr
+                               | NEVER COLON expr'''
     # PHP 8.0 allows reserved keywords as named-argument labels (e.g.
     # `new UserGlobals(global: $g)` in the CVE-2026-121429 AzuraCast
     # corpus).  Admit the common ones the lexer tokenizes beyond STRING.
@@ -1830,7 +1889,19 @@ def p_function_call_parameter_named_ref(p):
                                | MATCH COLON AND variable
                                | ENUM COLON AND variable
                                | FN COLON AND variable
-                               | FROM COLON AND variable'''
+                               | FROM COLON AND variable
+                               | VAR COLON AND variable
+                               | FUNCTION COLON AND variable
+                               | CONST COLON AND variable
+                               | UNSET COLON AND variable
+                               | ISSET COLON AND variable
+                               | EMPTY COLON AND variable
+                               | NEW COLON AND variable
+                               | CLONE COLON AND variable
+                               | ECHO COLON AND variable
+                               | PRINT COLON AND variable
+                               | MIXED COLON AND variable
+                               | NEVER COLON AND variable'''
     p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
 
 def p_expr_function(p):
@@ -2337,6 +2408,17 @@ def p_static_expr(p):
 def p_static_expr_group(p):
     'static_expr : LPAREN static_expr RPAREN'
     p[0] = p[2]
+
+def p_static_expr_ternary(p):
+    # Fix 56 (corpus gate, codeigniter4): constant expressions with
+    # ternaries in property/const defaults —
+    # `public $threshold = (ENVIRONMENT === 'production') ? 4 : 9;`
+    '''static_expr : static_expr QUESTION static_expr COLON static_expr %prec QUESTION
+                   | static_expr QUESTION COLON static_expr %prec QUESTION'''
+    if len(p) == 6:
+        p[0] = ast.TernaryOp(p[1], p[3], p[5], lineno=p.lineno(2))
+    else:
+        p[0] = ast.TernaryOp(p[1], p[1], p[4], lineno=p.lineno(2))
 
 def p_static_expr_unary(p):
     '''static_expr : NOT static_expr
