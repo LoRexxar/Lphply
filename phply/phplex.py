@@ -36,6 +36,8 @@ reserved = (
     'WHILE', 'FINAL', 'INTERFACE', 'IMPLEMENTS', 'PUBLIC', 'PRIVATE',
     'PROTECTED', 'ABSTRACT', 'CLONE', 'TRY', 'CATCH', 'THROW', 'NAMESPACE',
     'FINALLY', 'TRAIT', 'YIELD', 'FN', 'GOTO',
+    # PHP 7.0 (contextual keyword for `yield from`)
+    'FROM',
     # PHP 8.0
     'MATCH', 'MIXED',
     # PHP 8.1
@@ -349,7 +351,7 @@ def t_php_DNUMBER(t):
 
 # Integer literal
 def t_php_LNUMBER(t):
-    r'(0[bB][01]+)|(0[xX][0-9A-Fa-f]+)|\d[\d_]*'
+    r'(0[bB][01]+)|(0[oO][0-7]+)|(0[xX][0-9A-Fa-f]+)|\d[\d_]*'
     if isinstance(t.value, str):
         t.value = t.value.replace('_', '')
     return t
@@ -463,11 +465,18 @@ def t_php_START_HEREDOC(t):
     return t
 
 def t_heredoc_END_HEREDOC(t):
-    r'(?<=\n)[A-Za-z_][\w_]*'
-    if t.value == t.lexer.heredoc_label:
+    r'(?<=\n)[ \t]*(?P<label>[A-Za-z_][\w_]*)'
+    # PHP 7.3+: the closing identifier may be indented. ply delivers the
+    # whole match (indent + label) as t.value, so compare on the named
+    # group; when it is NOT the terminator, keep the full matched text
+    # (indent + identifier) as heredoc body — byte-identical to PHP.
+    matched = t.lexer.lexmatch.group('label')
+    if matched == t.lexer.heredoc_label:
         del t.lexer.heredoc_label
         t.lexer.pop_state()
+        t.value = matched
     else:
+        t.value = t.lexer.lexmatch.group(0)
         t.type = 'ENCAPSED_AND_WHITESPACE'
     return t
 
@@ -479,11 +488,15 @@ def t_php_START_NOWDOC(t):
     return t
 
 def t_nowdoc_END_NOWDOC(t):
-    r'(?<=\n)[A-Za-z_][\w_]*'
-    if t.value == t.lexer.nowdoc_label:
+    r'(?<=\n)[ \t]*(?P<label>[A-Za-z_][\w_]*)'
+    # PHP 7.3+ indented closing identifier (see t_heredoc_END_HEREDOC).
+    matched = t.lexer.lexmatch.group('label')
+    if matched == t.lexer.nowdoc_label:
         del t.lexer.nowdoc_label
         t.lexer.pop_state()
+        t.value = matched
     else:
+        t.value = t.lexer.lexmatch.group(0)
         t.type = 'ENCAPSED_AND_WHITESPACE'
     return t
 

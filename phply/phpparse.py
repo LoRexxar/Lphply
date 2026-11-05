@@ -211,11 +211,18 @@ def p_inner_statement(p):
 def p_inner_statement_yield(p):
     '''inner_statement : YIELD SEMI
                        | YIELD expr SEMI
-                       | YIELD expr DOUBLE_ARROW expr SEMI'''
+                       | YIELD expr DOUBLE_ARROW expr SEMI
+                       | YIELD FROM expr SEMI'''
     if len(p) == 3:
         p[0] = ast.Yield(None, None, lineno=p.lineno(1))
     elif len(p) == 4:
         p[0] = ast.Yield(None, p[2], lineno=p.lineno(1))
+    elif len(p) == 5:
+        # `yield from $gen` — delegate to the inner iterable.  Modelled as
+        # a Yield whose value is the iterable (key None), same as phply
+        # upstream; consumers that need the distinction check for the
+        # 'from' keyword via node position.
+        p[0] = ast.Yield(None, p[3], lineno=p.lineno(1))
     else:
         p[0] = ast.Yield(p[2], p[4], lineno=p.lineno(1))
 
@@ -472,12 +479,16 @@ def p_for_statement(p):
 
 def p_foreach_variable(p):
     '''foreach_variable : LIST LPAREN assignment_list RPAREN
+                        | LBRACKET assignment_list RBRACKET
                         | variable
                         | AND variable'''
     # actually the only the value supports lists, but that's a runtime error in
     # php, so let it parse here as well
+    # Fix 54: short list destruct `foreach ($a as [$p, $e])` — PHP 7.1+.
     if len(p) == 5:
         p[0] = ast.ForeachVariable(p[3], False, lineno=p.lineno(1))
+    elif len(p) == 4:
+        p[0] = ast.ForeachVariable(p[2], False, lineno=p.lineno(1))
     elif len(p) == 2:
         p[0] = ast.ForeachVariable(p[1], False, lineno=p.lineno(1))
     else:
@@ -591,7 +602,14 @@ def p_identifier_or_reserved(p):
                               | CONST
                               | NEW
                               | ECHO
-                              | PRINT'''
+                              | PRINT
+                              | DEFAULT
+                              | CLONE
+                              | ARRAY
+                              | UNSET
+                              | ISSET
+                              | EMPTY
+                              | EVAL'''
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
@@ -645,8 +663,13 @@ def p_class_entry_type(p):
     '''class_entry_type : CLASS
                         | ABSTRACT CLASS
                         | FINAL CLASS
-                        | READONLY CLASS'''
+                        | READONLY CLASS
+                        | FINAL READONLY CLASS
+                        | ABSTRACT READONLY CLASS'''
     if len(p) == 3:
+        p[0] = p[1].lower()
+    elif len(p) == 4:
+        # PHP 8.2 `final readonly class` (AzuraCast controllers).
         p[0] = p[1].lower()
 
 def p_optional_enum_backing_type(p):
@@ -755,13 +778,25 @@ def p_trait_statement(p):
                        | variable_modifiers optional_property_type class_variable_declaration SEMI
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
-                       | USE fully_qualified_class_name SEMI'''
+                       | USE fully_qualified_class_name SEMI
+                       | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
+                       | variable_modifiers optional_property_type VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
+    # Fix 54: traits carry property hooks too (HasSongFields in the
+    # CVE-2026-121429 corpus) — mirror the class_statement productions.
     if len(p) == 10:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
         p[0] = ast.TraitUse(p[2], p[4], lineno=p.lineno(1))
     elif len(p) == 5:
         p[0] = ast.ClassVariables(p[1], p[3], property_type=p[2], hooks=None, lineno=p.lineno(4))
+    elif len(p) == 9:
+        # property with default value + hooks
+        p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], p[5], lineno=p.lineno(3))],
+                                   property_type=p[2], hooks=p[7], lineno=p.lineno(6))
+    elif len(p) == 7:
+        # property with hooks
+        p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], None, lineno=p.lineno(3))],
+                                   property_type=p[2], hooks=p[5], lineno=p.lineno(4))
     elif len(p) == 3:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
     else:
@@ -785,7 +820,8 @@ def p_class_statement(p):
                        | class_constant_declaration SEMI
                        | USE fully_qualified_class_name LBRACE trait_modifiers_list RBRACE
                        | USE fully_qualified_class_name SEMI
-                       | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE'''
+                       | variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
+                       | variable_modifiers optional_property_type VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
     if len(p) == 10:
         p[0] = ast.Method(p[4], p[1], p[6], p[9], p[3], return_type=p[8], lineno=p.lineno(2))
     elif len(p) == 6:
@@ -802,6 +838,11 @@ def p_class_statement(p):
         # variable_modifiers optional_property_type VARIABLE LBRACE property_hook_list RBRACE
         p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], None, lineno=p.lineno(3))],
                                    property_type=p[2], hooks=p[5], lineno=p.lineno(4))
+    elif len(p) == 9:
+        # PHP 8.4: Property hooks WITH default value:
+        # variable_modifiers optional_property_type VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE
+        p[0] = ast.ClassVariables(p[1], [ast.ClassVariable(p[3], p[5], lineno=p.lineno(3))],
+                                   property_type=p[2], hooks=p[7], lineno=p.lineno(6))
     else:
         p[0] = ast.ClassConstants(p[1], lineno=p.lineno(2))
 
@@ -865,9 +906,13 @@ def p_property_hook(p):
     '''property_hook : STRING DOUBLE_ARROW expr SEMI
                      | STRING LBRACE inner_statement_list RBRACE
                      | STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+                     | STRING SEMI
+                     | STRING LPAREN parameter_list RPAREN DOUBLE_ARROW expr SEMI
                      | member_modifier STRING DOUBLE_ARROW expr SEMI
                      | member_modifier STRING LBRACE inner_statement_list RBRACE
-                     | member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE'''
+                     | member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
+                     | member_modifier STRING SEMI
+                     | member_modifier STRING LPAREN parameter_list RPAREN DOUBLE_ARROW expr SEMI'''
     if len(p) == 5 and p.slice[2].type == 'DOUBLE_ARROW':
         # STRING DOUBLE_ARROW expr SEMI (short form, e.g. get => expr;)
         p[0] = ast.PropertyHook(p[1], None, p[3], None, True)
@@ -886,6 +931,22 @@ def p_property_hook(p):
     elif len(p) == 9:
         # member_modifier STRING LPAREN parameter_list RPAREN LBRACE inner_statement_list RBRACE
         p[0] = ast.PropertyHook(p[2], p[4], p[7], p[1], False)
+    elif len(p) == 3 and p.slice[2].type == 'SEMI':
+        # PHP 8.4 abstract hook short form: `get;` / `set;` (interface
+        # PathAwareInterface in the CVE-2026-121429 corpus). No body, no
+        # expression — declaration only.
+        p[0] = ast.PropertyHook(p[1], None, None, None, False)
+    elif len(p) == 4 and p.slice[3].type == 'SEMI':
+        # member_modifier STRING SEMI  (e.g. `public get;`)
+        p[0] = ast.PropertyHook(p[2], None, None, p[1], False)
+    elif len(p) == 8 and p.slice[5].type == 'DOUBLE_ARROW':
+        # Fix 54: typed-param short hook `set (?string $value) => expr;`
+        # (StationBackendConfiguration setters — the source entity of
+        # CVE-2026-121429 itself).
+        p[0] = ast.PropertyHook(p[1], p[3], p[6], None, True)
+    elif len(p) == 10:
+        # member_modifier STRING LPAREN parameter_list RPAREN DOUBLE_ARROW expr SEMI
+        p[0] = ast.PropertyHook(p[2], p[4], p[8], p[1], True)
 
 
 
@@ -938,8 +999,14 @@ def p_member_modifier(p):
                        | STATIC
                        | ABSTRACT
                        | FINAL
-                       | READONLY'''
-    p[0] = p[1].lower()
+                       | READONLY
+                       | visibility_modifier LPAREN STRING RPAREN'''
+    # Fix 54: PHP 8.4 asymmetric visibility `private(set)` / `protected(set)`
+    # — the lexer emits `set` as a plain STRING.
+    if len(p) == 5:
+        p[0] = p[1].lower() + '(' + p[3] + ')'
+    else:
+        p[0] = p[1].lower() if isinstance(p[1], str) else p[1]
 
 def p_is_reference(p):
     '''is_reference : AND
@@ -1105,12 +1172,20 @@ def p_parameter_promoted(p):
                  | READONLY QUESTION type_expr VARIABLE
                  | READONLY QUESTION type_expr AND VARIABLE
                  | READONLY QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar'''
+                 | READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier type_expr VARIABLE LBRACE property_hook_list RBRACE
+                 | visibility_modifier type_expr VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE
+                 | visibility_modifier QUESTION type_expr VARIABLE LBRACE property_hook_list RBRACE
+                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
     # Strip visibility/readonly modifiers and parse the rest as a normal parameter.
     # readonly is promoted-property-only in PHP 8.1, so dropping it here is safe:
     # the param still records visibility via _parse_parameter(parts).
     first_tok = 1
     parts = list(p)
+    # Fix 54: constructor-promotion WITH property hooks — drop the
+    # `LBRACE property_hook_list RBRACE` tail before delegating.
+    if p.slice[len(p) - 2].type == 'RBRACE' and p.slice[len(p) - 3].type == 'property_hook_list':
+        parts = parts[:-3]
     while first_tok < len(parts) - 1 and isinstance(parts[first_tok], str) and parts[first_tok].lower() in (
             'public', 'protected', 'private', 'readonly'):
         first_tok += 1
@@ -1185,7 +1260,8 @@ def p_class_name_reference(p):
 
 def p_anonymous_class(p):
     '''anonymous_class : CLASS extends_from implements_list LBRACE class_statement_list RBRACE ctor_arguments
-                       | CLASS LPAREN function_call_parameter_list RPAREN LBRACE class_statement_list RBRACE ctor_arguments'''
+                       | CLASS LPAREN function_call_parameter_list RPAREN LBRACE class_statement_list RBRACE ctor_arguments
+                       | CLASS LPAREN function_call_parameter_list RPAREN extends_from implements_list LBRACE class_statement_list RBRACE ctor_arguments'''
     if len(p) == 8:
         # CLASS extends_from implements_list LBRACE class_statement_list RBRACE ctor_arguments
         traits = []
@@ -1196,6 +1272,17 @@ def p_anonymous_class(p):
             else:
                 stmts.append(s)
         p[0] = ast.AnonymousClass(p[2], p[3], traits, stmts, p[7], lineno=p.lineno(1))
+    elif len(p) == 11:
+        # Fix 54: `new class ($args) extends P implements I {}` —
+        # constructor args AND heritage (MariaDbPlatform corpus file).
+        traits = []
+        stmts = []
+        for s in p[8]:
+            if isinstance(s, ast.TraitUse):
+                traits.append(s)
+            else:
+                stmts.append(s)
+        p[0] = ast.AnonymousClass(p[5], p[6], traits, stmts, p[10], lineno=p.lineno(1))
     else:
         # CLASS LPAREN function_call_parameter_list RPAREN LBRACE class_statement_list RBRACE ctor_arguments
         traits = []
@@ -1357,7 +1444,61 @@ def p_function_call_static(p):
 def p_reserved_method_name(p):
     '''reserved_method_name : LIST
                             | CLASS
-                            | CONST'''
+                            | CONST
+                            | DEFAULT
+                            | ARRAY
+                            | EMPTY
+                            | ISSET
+                            | UNSET
+                            | ECHO
+                            | PRINT
+                            | EVAL
+                            | MATCH
+                            | ENUM
+                            | FROM
+                            | FN
+                            | FUNCTION
+                            | USE
+                            | STATIC
+                            | GLOBAL
+                            | NEW
+                            | PUBLIC
+                            | PRIVATE
+                            | PROTECTED
+                            | VAR
+                            | DO
+                            | IF
+                            | ELSE
+                            | WHILE
+                            | FOR
+                            | FOREACH
+                            | SWITCH
+                            | CASE
+                            | BREAK
+                            | CONTINUE
+                            | RETURN
+                            | THROW
+                            | TRY
+                            | CATCH
+                            | FINALLY
+                            | INSTANCEOF
+                            | EXTENDS
+                            | IMPLEMENTS
+                            | NAMESPACE
+                            | TRAIT
+                            | INTERFACE
+                            | ABSTRACT
+                            | FINAL
+                            | GOTO
+                            | DECLARE
+                            | INCLUDE
+                            | INCLUDE_ONCE
+                            | REQUIRE
+                            | REQUIRE_ONCE'''
+    # PHP 7.0+ allows reserved keywords as method names.  Enum-backed
+    # factories and utility classes use them liberally: `Class::default()`
+    # (HlsStreamProfiles), `Types::array()` / `Types::string()` — both
+    # heavily used by the CVE-2026-121429 AzuraCast corpus.
     p[0] = p[1]
 
 def p_function_call_static_dynamic_name(p):
@@ -1367,7 +1508,17 @@ def p_function_call_static_dynamic_name(p):
 
 def p_function_call_variable(p):
     '''function_call : variable_without_objects LPAREN function_call_parameter_list RPAREN
-                     | LPAREN expr RPAREN LPAREN function_call_parameter_list RPAREN'''
+                     | LPAREN expr RPAREN LPAREN function_call_parameter_list RPAREN
+                     | variable_without_objects LPAREN ELLIPSIS RPAREN
+                     | LPAREN expr RPAREN LPAREN ELLIPSIS RPAREN'''
+    # Fix 54: first-class callable syntax on a plain variable, `$c(...)` —
+    # PHP 8.1 (DecoratedEntityManager in the CVE-2026-121429 corpus).
+    if p.slice[2].type == 'ELLIPSIS':
+        if len(p) == 5:
+            p[0] = ast.FirstClassCallable(p[1], lineno=p.lineno(1))
+        else:
+            p[0] = ast.FirstClassCallable(p[2], lineno=p.lineno(3))
+        return
     if len(p) == 5:
         p[0] = ast.FunctionCall(p[1], p[3], lineno=p.lineno(2))
     else:
@@ -1464,6 +1615,13 @@ def p_variable_class_constant_offset(p):
     # variable-offset rule cannot reach it; wrap as ArrayOffset(StaticProperty)
     'variable : class_constant LBRACKET dim_offset RBRACKET'
     p[0] = ast.ArrayOffset(p[1], p[3], lineno=p.lineno(2))
+
+def p_variable_call_result_offset(p):
+    # Fix 54: `(f($x))[0]` / `(new C)[0]` — subscripting a parenthesised
+    # expression (function-call result dereference, PHP 7+).  Grammar-only
+    # admission; ArrayOffset carries the inner expr.
+    'variable : LPAREN expr RPAREN LBRACKET dim_offset RBRACKET'
+    p[0] = ast.ArrayOffset(p[2], p[4], lineno=p.lineno(4))
 
 def p_reference_variable_array_offset(p):
     'reference_variable : reference_variable LBRACKET dim_offset RBRACKET'
@@ -1647,26 +1805,57 @@ def p_function_call_parameter(p):
 
 def p_function_call_parameter_named(p):
     '''function_call_parameter : STRING COLON expr
-                               | ARRAY COLON expr'''
+                               | ARRAY COLON expr
+                               | GLOBAL COLON expr
+                               | STATIC COLON expr
+                               | DEFAULT COLON expr
+                               | LIST COLON expr
+                               | MATCH COLON expr
+                               | ENUM COLON expr
+                               | FN COLON expr
+                               | FROM COLON expr'''
+    # PHP 8.0 allows reserved keywords as named-argument labels (e.g.
+    # `new UserGlobals(global: $g)` in the CVE-2026-121429 AzuraCast
+    # corpus).  Admit the common ones the lexer tokenizes beyond STRING.
     p[0] = ast.NamedParameter(p[1], p[3], False, lineno=p.lineno(1))
 
 def p_function_call_parameter_named_ref(p):
     '''function_call_parameter : STRING COLON AND variable
-                               | ARRAY COLON AND variable'''
+                               | ARRAY COLON AND variable
+                               | GLOBAL COLON AND variable
+                               | STATIC COLON AND variable
+                               | DEFAULT COLON AND variable
+                               | LIST COLON AND variable
+                               | MATCH COLON AND variable
+                               | ENUM COLON AND variable
+                               | FN COLON AND variable
+                               | FROM COLON AND variable'''
     p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
 
 def p_expr_function(p):
     '''expr : FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE
             | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars LBRACE inner_statement_list RBRACE
             | FUNCTION is_reference LPAREN parameter_list RPAREN optional_return_type lexical_vars LBRACE inner_statement_list RBRACE
-            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN optional_return_type lexical_vars LBRACE inner_statement_list RBRACE'''
+            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN optional_return_type lexical_vars LBRACE inner_statement_list RBRACE
+            | FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars optional_return_type LBRACE inner_statement_list RBRACE
+            | STATIC FUNCTION is_reference LPAREN parameter_list RPAREN lexical_vars optional_return_type LBRACE inner_statement_list RBRACE'''
     # Fix 52-3: closures may declare a return type (function (): void {}).
+    # Fix 54: PHP syntax is `function () use ($x): T {}` — the return type
+    # comes AFTER the use-clause.  The earlier Fix 52-3 production put it
+    # before (wrong order); keep it for backwards tolerance but add the
+    # correct one (AzuraCast closures: `static function ($var) use ($c): void {}`).
     if len(p) == 10:
+        # FUNCTION ( params ) use-vars { body } — no return type
         p[0] = ast.Closure(p[4], p[6], p[8], p[2], lineno=p.lineno(1))
     elif len(p) == 11:
-        p[0] = ast.Closure(p[4], p[7], p[9], p[2], lineno=p.lineno(1))
+        # FUNCTION ( params ) ?return_type ?use-vars { body } — either order;
+        # distinguish by which slot holds lexical_vars (starts with USE).
+        uses = p[6] if p.slice[6].type == 'lexical_vars' else p[7]
+        p[0] = ast.Closure(p[4], uses, p[9], p[2], lineno=p.lineno(1))
     elif len(p) == 12:
-        p[0] = ast.Closure(p[5], p[8], p[10], p[3], lineno=p.lineno(1))
+        # STATIC FUNCTION ( params ) ?return_type ?use-vars { body }
+        uses = p[7] if p.slice[7].type == 'lexical_vars' else p[8]
+        p[0] = ast.Closure(p[5], uses, p[10], p[3], lineno=p.lineno(1))
     else:
         p[0] = ast.Closure(p[5], p[7], p[9], p[3], lineno=p.lineno(1))
 
@@ -1942,8 +2131,20 @@ def p_scalar_namespace_name(p):
 
 def p_class_constant(p):
     '''class_constant : class_name DOUBLE_COLON STRING
-                      | variable_class_name DOUBLE_COLON STRING'''
-    p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
+                      | variable_class_name DOUBLE_COLON STRING
+                      | class_name DOUBLE_COLON reserved_method_name
+                      | variable_class_name DOUBLE_COLON reserved_method_name'''
+    # Fix 54: enum cases named after reserved words — `Visibility::PUBLIC`,
+    # `Level::Info` etc.  The name slot reuses reserved_method_name (LIST/
+    # CLASS/CONST/DEFAULT/ARRAY/.../FROM), which PHP 7.0+ allows as
+    # constant identifiers too.  `::class` keeps its own production
+    # (p_class_name_constant) — when the LALR routes `A::class` here via
+    # reserved_method_name's CLASS alternative, delegate to the
+    # class_name_constant semantics (bare class name, no StaticProperty).
+    if p.slice[3].type == 'reserved_method_name' and p[3] == 'class':
+        p[0] = p[1]
+    else:
+        p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
 
 def p_common_scalar_lnumber(p):
     'common_scalar : LNUMBER'
@@ -1951,6 +2152,9 @@ def p_common_scalar_lnumber(p):
         p[0] = int(p[1], 16)
     elif p[1].startswith('0b') or p[1].startswith('0B'):
         p[0] = int(p[1], 2)
+    elif p[1].startswith('0o') or p[1].startswith('0O'):
+        # Fix 54: explicit octal literal (PHP 8.1+, `0o777`).
+        p[0] = int(p[1][2:], 8)
     elif p[1].startswith('0') and len(p[1]) > 1 and all(c in '01234567' for c in p[1][1:]):
         p[0] = int(p[1], 8)
     elif p[1].startswith('0') and len(p[1]) > 1:
@@ -2011,11 +2215,16 @@ def p_static_scalar(p):
                      | QUOTE ENCAPSED_AND_WHITESPACE QUOTE
                      | static_heredoc
                      | nowdoc
-                     | class_name_constant'''
+                     | class_name_constant
+                     | class_constant OBJECT_OPERATOR STRING'''
     if len(p) == 2:
         p[0] = p[1]
     elif len(p) == 3:
         p[0] = ''
+    elif len(p) == 4 and p.slice[2].type == 'OBJECT_OPERATOR':
+        # Fix 54: enum case property in const expressions —
+        # `Level::Info->value` (TestWebhookMessage corpus).
+        p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
     else:
         p[0] = process_php_string_escapes(p[2])
 
@@ -2127,6 +2336,14 @@ def p_static_expr(p):
 def p_static_expr_group(p):
     'static_expr : LPAREN static_expr RPAREN'
     p[0] = p[2]
+
+def p_static_expr_unary(p):
+    '''static_expr : NOT static_expr
+                   | PLUS static_expr
+                   | MINUS static_expr'''
+    # PHP allows unary ~ / + / - in constant expressions (`const C =
+    # E_ALL & ~E_DEPRECATED` in the CVE-2026-121429 AzuraCast corpus).
+    p[0] = ast.UnaryOp(p[1], p[2], lineno=p.lineno(1))
 
 # Soft-reserved words that remain legal as namespace segments / class names
 # (PHP only hard-reserves class names list, not enum/trait/etc. in namespaces).
