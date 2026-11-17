@@ -261,6 +261,14 @@ def t_php_DOC_COMMENT(t):
 
 def t_php_COMMENT(t):
     r'/\*(.|\n)*?\*/ | //([^?%\n]|[?%](?!>))*\n? | \#([^?%\n]|[?%](?!>))*\n?'
+    # Fix 57 (CVE-2026-126483): count newlines for the ORDINARY comment
+    # branches too. The old code only counted inside the '#[' attribute
+    # branch, so every `//`, `#`, and non-doc `/* */` comment silently
+    # lost its newlines — t.lexer.lineno drifted further from the real
+    # file line as the file went on (openemr ippf_statistics.php: a call
+    # at real line 1460 was reported at line 1310, drifting +17→+147).
+    # Doc comments are unaffected (separate t_php_DOC_COMMENT rule).
+    t.lexer.lineno += t.value.count("\n")
     # PHP 8 attributes: '#[' must NOT be treated as a comment. Real attribute
     # lexing is out of scope; consume the whole attribute block (balanced
     # brackets up to the matching ']') and emit it as a comment so multi-line
