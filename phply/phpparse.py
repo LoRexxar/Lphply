@@ -152,11 +152,46 @@ def p_top_statement_constant(p):
 def p_top_statement_use(p):
     '''top_statement : USE use_declarations SEMI
                      | USE FUNCTION use_declarations SEMI
-                     | USE CONST use_declarations SEMI'''
+                     | USE CONST use_declarations SEMI
+                     | USE use_group SEMI'''
     if len(p) == 4:
         p[0] = ast.UseDeclarations(p[2], lineno=p.lineno(1))
     else:
         p[0] = ast.UseDeclarations(p[3], lineno=p.lineno(1))
+
+def p_use_group(p):
+    # Fix 107: PHP 7 grouped use statements — `use A\B\{C, D as E, F\G};`
+    # (OpenEMR corpus: interface/billing/billing_tracker.php etc.).  The
+    # group is flattened into fully-qualified UseDeclaration entries so the
+    # downstream AST shape is identical to ungrouped `use A\B\C;`.
+    '''use_group : namespace_name NS_SEPARATOR LBRACE grouped_use_declarations RBRACE
+                | NS_SEPARATOR namespace_name NS_SEPARATOR LBRACE grouped_use_declarations RBRACE'''
+    if len(p) == 6:
+        prefix, decls = p[1], p[4]
+    else:
+        prefix, decls = p[1] + p[2], p[5]
+    p[0] = [ast.UseDeclaration(prefix + '\\' + name, alias, lineno=ln)
+            for name, alias, ln in decls]
+
+def p_grouped_use_declarations(p):
+    '''grouped_use_declarations : grouped_use_declarations COMMA grouped_use_declaration
+                                | grouped_use_declaration
+                                | grouped_use_declarations COMMA'''
+    # Fix 107: trailing comma before `}` (PHP 7.3+, OpenEMR uses it).
+    if len(p) == 4:
+        p[0] = p[1] + [p[3]]
+    elif len(p) == 3:
+        p[0] = p[1]
+    else:
+        p[0] = [p[1]]
+
+def p_grouped_use_declaration(p):
+    '''grouped_use_declaration : namespace_name
+                               | namespace_name AS STRING'''
+    if len(p) == 2:
+        p[0] = (p[1], None, p.lineno(1))
+    else:
+        p[0] = (p[1], p[3], p.lineno(1))
 
 def p_use_declarations(p):
     '''use_declarations : use_declarations COMMA use_declaration
@@ -615,7 +650,13 @@ def p_identifier_or_reserved(p):
                               | UNSET
                               | ISSET
                               | EMPTY
-                              | EVAL'''
+                              | EVAL
+                              | DIE
+                              | EXIT'''
+    # Fix 107: `die`/`exit` as method names (OpenEMR Installer.class.php
+    # `protected function die(string $message): never` — CVE-2026-126482
+    # corpus).  DIE/EXIT lex to dedicated tokens, so the method-name slot
+    # must admit them explicitly.
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
@@ -1442,25 +1483,37 @@ def p_assignment_list_element(p):
 
 def p_variable(p):
     '''variable : base_variable_with_function_calls OBJECT_OPERATOR object_property method_or_not variable_properties
+                | base_variable_with_function_calls OBJECT_OPERATOR object_property method_or_not variable_properties DOUBLE_COLON CLASS
                 | base_variable_with_function_calls'''
+    if len(p) == 8:
+        # Fix 107: `$arr['x']->prop::class` — dynamic class-name resolution
+        # on a member chain (OpenEMR TreeMenu.php dataSourceClass::class —
+        # CVE-2026-126482 corpus).  Mirrors static_member's CLASS handling
+        # for `$x::class`: MagicConstant('::class', chain).
+        chain = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
+        p[0] = ast.MagicConstant('::class', chain, lineno=p.lineno(7))
+        return
     if len(p) == 6:
-        name, dims = p[3]
-        params = p[4]
-        if params is not None:
-            p[0] = ast.MethodCall(p[1], name, params, lineno=p.lineno(2))
-        else:
-            p[0] = ast.ObjectProperty(p[1], name, lineno=p.lineno(2))
-        for class_, dim, lineno in dims:
-            p[0] = class_(p[0], dim, lineno=lineno)
-        for (name, dims), params in p[5]:
-            if params is not None:
-                p[0] = ast.MethodCall(p[0], name, params, lineno=p.lineno(2))
-            else:
-                p[0] = ast.ObjectProperty(p[0], name, lineno=p.lineno(2))
-            for class_, dim, lineno in dims:
-                p[0] = class_(p[0], dim, lineno=lineno)
+        p[0] = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
     else:
         p[0] = p[1]
+
+def _build_member_chain(base, prop, params, more_props, lineno):
+    name, dims = prop
+    if params is not None:
+        node = ast.MethodCall(base, name, params, lineno=lineno)
+    else:
+        node = ast.ObjectProperty(base, name, lineno=lineno)
+    for class_, dim, dim_lineno in dims:
+        node = class_(node, dim, lineno=dim_lineno)
+    for (name, dims), params in more_props:
+        if params is not None:
+            node = ast.MethodCall(node, name, params, lineno=lineno)
+        else:
+            node = ast.ObjectProperty(node, name, lineno=lineno)
+        for class_, dim, dim_lineno in dims:
+            node = class_(node, dim, lineno=dim_lineno)
+    return node
 
 def p_base_variable_with_function_calls(p):
     '''base_variable_with_function_calls : base_variable
@@ -1873,10 +1926,13 @@ def p_function_call_parameter_named(p):
                                | ECHO COLON expr
                                | PRINT COLON expr
                                | MIXED COLON expr
-                               | NEVER COLON expr'''
+                               | NEVER COLON expr
+                               | CLASS COLON expr'''
     # PHP 8.0 allows reserved keywords as named-argument labels (e.g.
     # `new UserGlobals(global: $g)` in the CVE-2026-121429 AzuraCast
     # corpus).  Admit the common ones the lexer tokenizes beyond STRING.
+    # Fix 107: `class:` label (OpenEMR sl_eob_process.php getDetailLine(
+    # class: 'olddetail', ...) — CVE-2026-126482 corpus).
     p[0] = ast.NamedParameter(p[1], p[3], False, lineno=p.lineno(1))
 
 def p_function_call_parameter_named_ref(p):
@@ -1901,7 +1957,8 @@ def p_function_call_parameter_named_ref(p):
                                | ECHO COLON AND variable
                                | PRINT COLON AND variable
                                | MIXED COLON AND variable
-                               | NEVER COLON AND variable'''
+                               | NEVER COLON AND variable
+                               | CLASS COLON AND variable'''
     p[0] = ast.NamedParameter(p[1], p[4], True, lineno=p.lineno(1))
 
 def p_expr_function(p):
