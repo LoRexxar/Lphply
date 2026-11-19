@@ -224,7 +224,10 @@ def p_constant_declarations(p):
         p[0] = [p[1]]
 
 def p_constant_declaration(p):
-    'constant_declaration : STRING EQUALS static_expr'
+    # Fix 108 (CVE-2026-44381): constant names may be reserved words
+    # (PHP 7.0+: `const NAMESPACE = ...` in BenchmarkTool).  The value slot
+    # is unchanged; only the name widens from bare STRING.
+    'constant_declaration : identifier_or_reserved EQUALS static_expr'
     p[0] = ast.ConstantDeclaration(p[1], p[3], lineno=p.lineno(1))
 
 def p_inner_statement_list(p):
@@ -652,11 +655,25 @@ def p_identifier_or_reserved(p):
                               | EMPTY
                               | EVAL
                               | DIE
-                              | EXIT'''
+                              | EXIT
+                              | MATCH
+                              | ENUM
+                              | FROM
+                              | FN
+                              | NAMESPACE
+                              | READONLY
+                              | NEVER
+                              | MIXED'''
     # Fix 107: `die`/`exit` as method names (OpenEMR Installer.class.php
     # `protected function die(string $message): never` — CVE-2026-126482
     # corpus).  DIE/EXIT lex to dedicated tokens, so the method-name slot
     # must admit them explicitly.
+    # Fix 108 (CVE-2026-44381 MISP corpus): PHP 7.0+ also allows the
+    # soft-reserved words as method/constant names — the MISP corpus has
+    # `public function from(...)` (CakeEmail, FROM), `function match($url)`
+    # (CakeRoute/PluginShortRoute/RedirectRoute, MATCH), `enum()`
+    # (Set::enum) and `const NAMESPACE = ...` (BenchmarkTool).  LALR-safe:
+    # these tokens only appear in this slot after a FUNCTION/CONST anchor.
     p[0] = p[1]
 
 def p_function_declaration_statement(p):
@@ -951,11 +968,11 @@ def p_class_variable_declaration_no_initial(p):
         p[0] = [ast.ClassVariable(p[1], None, lineno=p.lineno(1))]
 
 def p_class_constant_declaration(p):
-    '''class_constant_declaration : class_constant_declaration COMMA STRING EQUALS static_expr
-                                  | CONST STRING EQUALS static_expr
-                                  | non_empty_member_modifiers CONST STRING EQUALS static_expr
-                                  | CONST type_expr STRING EQUALS static_expr
-                                  | non_empty_member_modifiers CONST type_expr STRING EQUALS static_expr'''
+    '''class_constant_declaration : class_constant_declaration COMMA identifier_or_reserved EQUALS static_expr
+                                  | CONST identifier_or_reserved EQUALS static_expr
+                                  | non_empty_member_modifiers CONST identifier_or_reserved EQUALS static_expr
+                                  | CONST type_expr identifier_or_reserved EQUALS static_expr
+                                  | non_empty_member_modifiers CONST type_expr identifier_or_reserved EQUALS static_expr'''
     if len(p) == 6:
         if p.slice[2].type == 'COMMA':
             # class_constant_declaration COMMA STRING EQUALS static_expr
@@ -1399,8 +1416,16 @@ def p_class_name_static(p):
     p[0] = p[1].lower()
 
 def p_dynamic_class_name_reference(p):
-    '''dynamic_class_name_reference : base_variable OBJECT_OPERATOR object_property dynamic_class_name_variable_properties
-                                    | base_variable'''
+    '''dynamic_class_name_reference : simple_indirect_reference OBJECT_OPERATOR object_property dynamic_class_name_variable_properties
+                                    | simple_indirect_reference'''
+    # Fix 108 (CVE-2026-44381 MISP corpus): the base is
+    # `simple_indirect_reference`, NOT `base_variable`.  base_variable
+    # carries the static_member arm, and static_member → variable_class_name
+    # → member_chain → bvwfc → function_call drags `namespace_name LPAREN`
+    # into the NEW-context closure — `new CakeResponse()` then shifts into
+    # the function_call dead end on LPAREN (D6 spy evidence).  No corpus
+    # instance of `new $x::static` exists, so losing static_member as a
+    # NEW base costs nothing.
     if len(p) == 5:
         name, dims = p[3]
         p[0] = ast.ObjectProperty(p[1], name, lineno=p.lineno(2))
@@ -1481,22 +1506,51 @@ def p_assignment_list_element(p):
     else:
         p[0] = p[3]
 
+def p_member_chain(p):
+    # Fix 108 (CVE-2026-44381 MISP corpus): hoisted member chain — the
+    # `variable` first arm isolated as its own nonterminal so `variable`
+    # and `variable_class_name` can both derive it without two rules
+    # sharing an identical full RHS (identical RHS = reduce/reduce decided
+    # by definition order, silently killing one arm).  The base is
+    # `base_variable`: with `base_variable_with_function_calls` instead,
+    # function_call/expr items enter the const/property-initializer
+    # closure and `(1) + 2` / `(1 + 2)` static exprs die at PLUS/SEMI
+    # (R1b/R2a bisect, azuracast/codeigniter4 corpus).  The two hazards a
+    # base_variable base used to carry are fixed elsewhere: the
+    # `new $this->cls()` ctor-paren steal and the `new CakeResponse()`
+    # LPAREN dead end both came through dynamic_class_name_reference's
+    # base, cut in p_dynamic_class_name_reference.  Call-based chains
+    # (`C::f()->g()[0]`) live in call_member_chain instead: a function_call
+    # base HERE would reach variable_class_name → class_constant →
+    # static_scalar and poison every const/property initializer closure
+    # (`(1) + 2` dies at PLUS — R1b bisect).  `variable` itself is
+    # unreachable from static contexts (variable_without_objects :
+    # simple_indirect_reference only), so call_member_chain under
+    # `variable` is poison-free.
+    'member_chain : base_variable OBJECT_OPERATOR object_property method_or_not variable_properties'
+    p[0] = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
+
+def p_call_member_chain(p):
+    # Fix 108 (CVE-2026-44381 MISP corpus): `C::f()->g()` /
+    # `static::autoloader()->getNamespace('X')[0]` — a call result chained
+    # with -> accesses.  2.2.8 handled this via variable's
+    # base_variable_with_function_calls base; hoisting requires a separate
+    # nonterminal so member_chain stays function-call-free for
+    # variable_class_name / class_constant consumers (see p_member_chain).
+    'call_member_chain : function_call OBJECT_OPERATOR object_property method_or_not variable_properties'
+    p[0] = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
+
 def p_variable(p):
-    '''variable : base_variable_with_function_calls OBJECT_OPERATOR object_property method_or_not variable_properties
-                | base_variable_with_function_calls OBJECT_OPERATOR object_property method_or_not variable_properties DOUBLE_COLON CLASS
+    '''variable : member_chain
+                | call_member_chain
                 | base_variable_with_function_calls'''
-    if len(p) == 8:
-        # Fix 107: `$arr['x']->prop::class` — dynamic class-name resolution
-        # on a member chain (OpenEMR TreeMenu.php dataSourceClass::class —
-        # CVE-2026-126482 corpus).  Mirrors static_member's CLASS handling
-        # for `$x::class`: MagicConstant('::class', chain).
-        chain = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
-        p[0] = ast.MagicConstant('::class', chain, lineno=p.lineno(7))
-        return
-    if len(p) == 6:
-        p[0] = _build_member_chain(p[1], p[3], p[4], p[5], p.lineno(2))
-    else:
-        p[0] = p[1]
+    p[0] = p[1]
+    # Fix 107's `$chain::class` no longer has a dedicated production here:
+    # with Fix 108 the chain reduces to variable_class_name on a `::`
+    # lookahead and static_member's `variable_class_name DOUBLE_COLON CLASS`
+    # arm produces the same MagicConstant('::class', chain) node.  Keeping
+    # a DOUBLE_COLON alternative inside `variable` made `::` a shift token
+    # in the chain state, blocking the variable_class_name reduction.
 
 def _build_member_chain(base, prop, params, more_props, lineno):
     name, dims = prop
@@ -1703,12 +1757,32 @@ def p_static_member(p):
         p[0] = ast.StaticProperty(p[1], p[4], lineno=p.lineno(2))
 
 def p_variable_class_name(p):
-    'variable_class_name : reference_variable'
+    '''variable_class_name : reference_variable
+                           | member_chain'''
+    # Fix 108 (CVE-2026-44381 MISP corpus): PHP 8.0 `$obj::CONST` /
+    # `$this->Prop::CONST` / `$this->A->B::CONST` — a member chain used as
+    # the left side of a static access.  In the member_chain-complete
+    # state DOUBLE_COLON is only in FOLLOW(variable_class_name) (nothing
+    # puts a `variable` before `::`), so the two identical-RHS reductions
+    # (`variable : member_chain` / this arm) partition cleanly by
+    # lookahead: `::` → variable_class_name, everything else → variable.
+    # The NEW-context LPAREN poison this arm used to open (member_chain →
+    # bvwfc → function_call) is cut one level up, in
+    # p_dynamic_class_name_reference (simple_indirect_reference base).
     p[0] = p[1]
 
 def p_variable_array_offset(p):
     'variable : variable LBRACKET dim_offset RBRACKET'
     p[0] = ast.ArrayOffset(p[1], p[3], lineno=p.lineno(2))
+
+def p_variable_array_literal_offset(p):
+    # Fix 108 (CVE-2026-44381 MISP corpus): `array('a','b')[$i]` — direct
+    # subscript on an array() literal (PHP 5.5+ dereferencable syntax;
+    # FeedsController.php:1090).  Grammar-only admission; ArrayOffset wraps
+    # the literal exactly like the (expr)[...] form of Fix 54.
+    'variable : ARRAY LPAREN array_pair_list RPAREN LBRACKET dim_offset RBRACKET'
+    p[0] = ast.ArrayOffset(ast.Array(p[3], lineno=p.lineno(1)), p[6],
+                           lineno=p.lineno(5))
 
 def p_variable_class_constant_offset(p):
     # Fix 52: Class::CONST['key'] — class-constant array dereference
@@ -1775,17 +1849,33 @@ def p_object_dim_list_string_offset(p):
 
 def p_variable_name(p):
     '''variable_name : STRING
-                     | LBRACE expr RBRACE'''
+                     | LBRACE expr RBRACE
+                     | LIST
+                     | CLASS
+                     | CONST
+                     | DEFAULT
+                     | ARRAY
+                     | EMPTY
+                     | ISSET
+                     | UNSET
+                     | ECHO
+                     | PRINT
+                     | EVAL
+                     | MATCH
+                     | ENUM
+                     | FROM
+                     | FN
+                     | NAMESPACE
+                     | DIE
+                     | EXIT'''
+    # Fix 108 (CVE-2026-44381 MISP corpus): member/method names may be
+    # reserved words (PHP 7.0+): `$x->from(...)`, `$route->match(...)`,
+    # `Set::enum()`.  Only appears after OBJECT_OPERATOR, so the statement
+    #-level uses of these tokens (MATCH expr, YIELD FROM) are unaffected.
     if len(p) == 2:
         p[0] = p[1]
     else:
         p[0] = p[2]
-
-def p_variable_name_match(p):
-    # Fix 52-4: 'match' is a valid method/member name (Route::match) —
-    # the lexer emits MATCH for it, so allow it where a name is expected.
-    'variable_name : MATCH'
-    p[0] = 'match'
 
 def p_variable_without_objects(p):
     'variable_without_objects : simple_indirect_reference'
@@ -2271,7 +2361,15 @@ def p_class_constant(p):
     # reserved_method_name's CLASS alternative, delegate to the
     # class_name_constant semantics (bare class name, no StaticProperty).
     if p.slice[3].type == 'reserved_method_name' and p[3] == 'class':
-        p[0] = p[1]
+        if isinstance(p[1], str):
+            # A::class — evaluates to the bare class-name string.
+            p[0] = p[1]
+        else:
+            # Fix 108 (CVE-2026-44381): $x::class / $this->obj->prop::class
+            # routed here via the variable_class_name arm — mirror
+            # static_member's CLASS semantics (MagicConstant on the chain)
+            # instead of dropping the `::class` wrapper.
+            p[0] = ast.MagicConstant('::class', p[1], lineno=p.lineno(2))
     else:
         p[0] = ast.StaticProperty(p[1], p[3], lineno=p.lineno(2))
 
