@@ -606,7 +606,12 @@ def p_static_var_list(p):
         p[0] = [p[1]]
 
 def p_static_var(p):
-    '''static_var : VARIABLE EQUALS static_scalar
+    # Fix 121 (CVE-2026-111215 pfSense corpus): PHP static-local-var
+    # initializers are arbitrary runtime expressions evaluated lazily at
+    # first execution (gwlb.inc `static $gateways = get_gateways(...)`,
+    # syslog.inc, filter.inc).  The old static_scalar-only arm rejected
+    # function-call initializers and killed the whole enclosing file.
+    '''static_var : VARIABLE EQUALS expr
                   | VARIABLE'''
     if len(p) == 4:
         p[0] = ast.StaticVariable(p[1], p[3], lineno=p.lineno(1))
@@ -1222,18 +1227,22 @@ def _parse_parameter(parts, lineno):
         return ast.FormalParameter(parts[4], parts[6], True, type_hint, lineno=lineno)
 
 def p_parameter(p):
+    # Fix 121 (CVE-2026-111215 pfSense corpus): parameter defaults widened
+    # static_scalar→static_expr (util.inc msort: `$sort_flags = SORT_NATURAL
+    # | SORT_FLAG_CASE`).  static_expr's first arm IS static_scalar, so this
+    # is a pure widening mirroring Fix 56's property-default change.
     '''parameter : VARIABLE
                  | type_expr VARIABLE
                  | AND VARIABLE
                  | type_expr AND VARIABLE
-                 | VARIABLE EQUALS static_scalar
-                 | type_expr VARIABLE EQUALS static_scalar
-                 | AND VARIABLE EQUALS static_scalar
-                 | type_expr AND VARIABLE EQUALS static_scalar
+                 | VARIABLE EQUALS static_expr
+                 | type_expr VARIABLE EQUALS static_expr
+                 | AND VARIABLE EQUALS static_expr
+                 | type_expr AND VARIABLE EQUALS static_expr
                  | QUESTION type_expr VARIABLE
                  | QUESTION type_expr AND VARIABLE
-                 | QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | QUESTION type_expr VARIABLE EQUALS static_expr
+                 | QUESTION type_expr AND VARIABLE EQUALS static_expr
                  | ELLIPSIS VARIABLE
                  | type_expr ELLIPSIS VARIABLE'''
     p[0] = _parse_parameter(list(p), p.lineno(1))
@@ -1242,46 +1251,46 @@ def p_parameter_promoted(p):
     '''parameter : visibility_modifier VARIABLE
                  | visibility_modifier type_expr VARIABLE
                  | visibility_modifier type_expr AND VARIABLE
-                 | visibility_modifier VARIABLE EQUALS static_scalar
-                 | visibility_modifier type_expr VARIABLE EQUALS static_scalar
-                 | visibility_modifier type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier VARIABLE EQUALS static_expr
+                 | visibility_modifier type_expr VARIABLE EQUALS static_expr
+                 | visibility_modifier type_expr AND VARIABLE EQUALS static_expr
                  | visibility_modifier QUESTION type_expr VARIABLE
                  | visibility_modifier QUESTION type_expr AND VARIABLE
-                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_expr
+                 | visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_expr
                  | visibility_modifier READONLY VARIABLE
                  | visibility_modifier READONLY type_expr VARIABLE
                  | visibility_modifier READONLY type_expr AND VARIABLE
-                 | visibility_modifier READONLY VARIABLE EQUALS static_scalar
-                 | visibility_modifier READONLY type_expr VARIABLE EQUALS static_scalar
-                 | visibility_modifier READONLY type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY VARIABLE EQUALS static_expr
+                 | visibility_modifier READONLY type_expr VARIABLE EQUALS static_expr
+                 | visibility_modifier READONLY type_expr AND VARIABLE EQUALS static_expr
                  | visibility_modifier READONLY QUESTION type_expr VARIABLE
                  | visibility_modifier READONLY QUESTION type_expr AND VARIABLE
-                 | visibility_modifier READONLY QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | visibility_modifier READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | visibility_modifier READONLY QUESTION type_expr VARIABLE EQUALS static_expr
+                 | visibility_modifier READONLY QUESTION type_expr AND VARIABLE EQUALS static_expr
                  | READONLY visibility_modifier VARIABLE
                  | READONLY visibility_modifier type_expr VARIABLE
                  | READONLY visibility_modifier type_expr AND VARIABLE
-                 | READONLY visibility_modifier VARIABLE EQUALS static_scalar
-                 | READONLY visibility_modifier type_expr VARIABLE EQUALS static_scalar
-                 | READONLY visibility_modifier type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier VARIABLE EQUALS static_expr
+                 | READONLY visibility_modifier type_expr VARIABLE EQUALS static_expr
+                 | READONLY visibility_modifier type_expr AND VARIABLE EQUALS static_expr
                  | READONLY visibility_modifier QUESTION type_expr VARIABLE
                  | READONLY visibility_modifier QUESTION type_expr AND VARIABLE
-                 | READONLY visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | READONLY visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY visibility_modifier QUESTION type_expr VARIABLE EQUALS static_expr
+                 | READONLY visibility_modifier QUESTION type_expr AND VARIABLE EQUALS static_expr
                  | READONLY type_expr VARIABLE
                  | READONLY type_expr AND VARIABLE
                  | READONLY VARIABLE
-                 | READONLY type_expr VARIABLE EQUALS static_scalar
-                 | READONLY type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY type_expr VARIABLE EQUALS static_expr
+                 | READONLY type_expr AND VARIABLE EQUALS static_expr
                  | READONLY QUESTION type_expr VARIABLE
                  | READONLY QUESTION type_expr AND VARIABLE
-                 | READONLY QUESTION type_expr VARIABLE EQUALS static_scalar
-                 | READONLY QUESTION type_expr AND VARIABLE EQUALS static_scalar
+                 | READONLY QUESTION type_expr VARIABLE EQUALS static_expr
+                 | READONLY QUESTION type_expr AND VARIABLE EQUALS static_expr
                  | visibility_modifier type_expr VARIABLE LBRACE property_hook_list RBRACE
-                 | visibility_modifier type_expr VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE
+                 | visibility_modifier type_expr VARIABLE EQUALS static_expr LBRACE property_hook_list RBRACE
                  | visibility_modifier QUESTION type_expr VARIABLE LBRACE property_hook_list RBRACE
-                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_scalar LBRACE property_hook_list RBRACE'''
+                 | visibility_modifier QUESTION type_expr VARIABLE EQUALS static_expr LBRACE property_hook_list RBRACE'''
     # Strip visibility/readonly modifiers and parse the rest as a normal parameter.
     # readonly is promoted-property-only in PHP 8.1, so dropping it here is safe:
     # the param still records visibility via _parse_parameter(parts).
@@ -1790,6 +1799,20 @@ def p_variable_class_constant_offset(p):
     # variable-offset rule cannot reach it; wrap as ArrayOffset(StaticProperty)
     'variable : class_constant LBRACKET dim_offset RBRACKET'
     p[0] = ast.ArrayOffset(p[1], p[3], lineno=p.lineno(2))
+
+def p_variable_constant_offset(p):
+    # Fix 121 (CVE-2026-111215 pfSense corpus): bare constant array
+    # dereference — `PFCONFIG_CATEGORIES[$rule['force_category']]` in
+    # isset(), `PFCONFIG_ETHERNET_CAPTIVE_PORTAL['id']` as a call arg,
+    # `PFCONFIG_OPTION_LIMITS['id']` as an array-literal key, and the
+    # bareword nested form `index_mark['utf8']['last']` (nested second
+    # level rides the existing `variable : variable LBRACKET ...` arm).
+    # The base is the same namespace_name→Constant lookup the
+    # `scalar : namespace_name` rule produces, so ArrayOffset(Constant)
+    # matches the established shape.
+    'variable : namespace_name LBRACKET dim_offset RBRACKET'
+    p[0] = ast.ArrayOffset(ast.Constant(p[1], lineno=p.lineno(1)), p[3],
+                          lineno=p.lineno(2))
 
 def p_variable_call_result_offset(p):
     # Fix 54: `(f($x))[0]` / `(new C)[0]` — subscripting a parenthesised
