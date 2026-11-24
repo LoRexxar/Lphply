@@ -2587,6 +2587,14 @@ def p_static_expr_group(p):
     'static_expr : LPAREN static_expr RPAREN'
     p[0] = p[2]
 
+def p_static_expr_new(p):
+    # Fix 122 (lphply series, CVE-2026-69137 SuiteCRM 7.15.1 CalendarSync
+    # corpus): PHP 8.1 "new in initializers" — `new` in parameter/property/
+    # const/enum-case defaults, e.g. promoted ctor defaults
+    # `protected readonly Foo $x = new Foo()`.
+    '''static_expr : NEW class_name_reference ctor_arguments'''
+    p[0] = ast.New(p[2], p[3], lineno=p.lineno(1))
+
 def p_static_expr_ternary(p):
     # Fix 56 (corpus gate, codeigniter4): constant expressions with
     # ternaries in property/const defaults —
