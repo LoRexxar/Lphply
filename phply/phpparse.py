@@ -1301,11 +1301,22 @@ def p_parameter_promoted(p):
     # p.slice indexes 0..len(p)-1; the last symbol is at len(p)-1.
     if p.slice[len(p) - 1].type == 'RBRACE' and p.slice[len(p) - 2].type == 'property_hook_list':
         parts = parts[:-3]
+    # Fix 157c (CVE-2026-124444): capture the promotion modifiers BEFORE
+    # stripping them — PHP 8 constructor promotion `private $_sql` is an
+    # implicit `$this->_sql = $_sql` write, and the AST previously dropped
+    # the visibility token entirely, making promoted params
+    # indistinguishable from plain same-name params downstream.  Record the
+    # first modifier on the FormalParameter node (promoted field, None for
+    # non-promoted shapes).
+    _promoted_157c = []
     while first_tok < len(parts) - 1 and isinstance(parts[first_tok], str) and parts[first_tok].lower() in (
             'public', 'protected', 'private', 'readonly'):
+        _promoted_157c.append(parts[first_tok].lower())
         first_tok += 1
     shifted = [None] + parts[first_tok:]
     p[0] = _parse_parameter(shifted, p.lineno(1))
+    if _promoted_157c:
+        p[0].promoted = _promoted_157c[0]
 
 def p_expr_variable(p):
     'expr : variable'
@@ -1767,7 +1778,8 @@ def p_static_member(p):
 
 def p_variable_class_name(p):
     '''variable_class_name : reference_variable
-                           | member_chain'''
+                           | member_chain
+                           | LPAREN expr RPAREN'''
     # Fix 108 (CVE-2026-44381 MISP corpus): PHP 8.0 `$obj::CONST` /
     # `$this->Prop::CONST` / `$this->A->B::CONST` — a member chain used as
     # the left side of a static access.  In the member_chain-complete
@@ -1778,7 +1790,29 @@ def p_variable_class_name(p):
     # The NEW-context LPAREN poison this arm used to open (member_chain →
     # bvwfc → function_call) is cut one level up, in
     # p_dynamic_class_name_reference (simple_indirect_reference base).
-    p[0] = p[1]
+    #
+    # Fix 157a (CVE-2026-124444 OpenEMR/Phreeze corpus): PHP 8.0 dynamic
+    # class-name resolution — any parenthesized expression may be the base
+    # of `::`: `($objectclass . "Map")::GetFieldMaps()`
+    # (portal/patient/fwk/.../Phreezer.php:708, the Phreeze ORM hub whose
+    # SyntaxError silently excised the whole ORM from the graph).  The
+    # same lookahead-partition argument as Fix 108 applies at the
+    # `LPAREN expr RPAREN .` state: no production puts DOUBLE_COLON
+    # directly after an expr, so `::` reduces this arm while every other
+    # lookahead reduces `expr : LPAREN expr RPAREN`.  Fix 54's
+    # `function_call : LPAREN expr RPAREN LPAREN ...` already proved that
+    # state merges without conflict.  All eight `::` consumers
+    # (function_call static/brace/ellipsis arms, static_member, and
+    # class_constant) route through variable_class_name, so a single arm
+    # covers `(expr)::method()`, `(expr)::$prop`, `(expr)::CONST`,
+    # `(expr)::{expr}()`, `(expr)::class`, `(expr)::match(...)` etc.  The
+    # expression node itself becomes the StaticMethodCall /
+    # StaticProperty / MagicConstant class operand, exactly like the
+    # member_chain arm's node bases.
+    if len(p) == 4:
+        p[0] = p[2]
+    else:
+        p[0] = p[1]
 
 def p_variable_array_offset(p):
     'variable : variable LBRACKET dim_offset RBRACKET'
@@ -2585,6 +2619,28 @@ def p_static_expr(p):
 
 def p_static_expr_group(p):
     'static_expr : LPAREN static_expr RPAREN'
+    p[0] = p[2]
+
+def p_static_expr_group_expr(p):
+    # Fix 157a2 (CVE-2026-124444): paren groups in static (const/prop/
+    # enum-case/declare/param-default) initializers whose inner tokens
+    # reduce to `expr`.  Fix 157a's `variable_class_name : LPAREN expr
+    # RPAREN` arm pulls `expr : . ...` into every static-initializer
+    # closure (via static_scalar → class_constant → variable_class_name),
+    # so the inner `60*60*13` of `const T = (60*60*13) + 150` reduces via
+    # `expr : scalar` (rule order beats `static_scalar : common_scalar`)
+    # and the group lands in the `LPAREN expr RPAREN .` state — which
+    # before this fix contained ONLY the variable_class_name item, whose
+    # single-reduce state PLY turns into a DEFAULT reduction firing on
+    # every lookahead: `+`/`;`/`,` died as "variable_class_name" in a
+    # position no production accepts (SyntaxError; the Fix 108
+    # static-expression regression family + azuracast/codeigniter corpus
+    # files).  With this arm the state carries both complete items and
+    # partitions by lookahead exactly like state 345 does for the dynamic
+    # context: `::` → variable_class_name (Fix 157a), every static
+    # follower (SEMI/COMMA/binop/QUESTION/...) → static_expr.  The two
+    # lookahead sets are disjoint — nothing puts `::` after static_expr.
+    'static_expr : LPAREN expr RPAREN'
     p[0] = p[2]
 
 def p_static_expr_new(p):

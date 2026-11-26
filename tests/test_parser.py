@@ -1066,8 +1066,11 @@ def test_constructor_promotion():
     expected = [
         Class('A', None, None, [], [],
               [Method('__construct', ['public'],
-                      [FormalParameter('$x', None, False, 'int'),
-                       FormalParameter('$y', 'a', False, 'string')],
+                      # Fix 157c: the promotion modifier is captured on the
+                      # FormalParameter (`promoted` field, None for plain
+                      # params) — implicit `$this->x = $x` write evidence.
+                      [FormalParameter('$x', None, False, 'int', 'public'),
+                       FormalParameter('$y', 'a', False, 'string', 'private')],
                       [], False)]),
     ]
     eq_ast(input, expected)
