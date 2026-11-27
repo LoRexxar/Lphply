@@ -276,6 +276,18 @@ def t_php_COMMENT(t):
     if t.value.startswith('#['):
         # t.lexer.lexpos already points PAST the matched text; the attribute
         # actually starts at lexpos - len(t.value).
+        # Fix 158 (CVE-2026-124479): the regex match above (single line plus
+        # its trailing newline) already had its newlines counted by the
+        # `t.lexer.lineno += t.value.count("\n")` at the top of this rule.
+        # Re-consuming the whole attribute block and counting the FULL block
+        # newlines again double-counts the first line's newline; and for a
+        # single-line attribute the rewound lexpos re-lexes the already
+        # counted trailing newline as whitespace. Subtract the original
+        # match's contribution so every real newline is counted exactly once
+        # (openemr DocumentRestController.php: 3 #[OA\Get] blocks drifted
+        # sink linenos by +3 — `new BinaryFileResponse` at line 161 was
+        # reported at 164).
+        orig_newlines = t.value.count("\n")
         pos = t.lexer.lexpos - len(t.value)
         src = t.lexer.lexdata
         j = pos + 2  # skip '#['
@@ -295,7 +307,7 @@ def t_php_COMMENT(t):
             end += 1
         t.value = src[pos:end]
         t.lexer.lexpos = end
-        t.lexer.lineno += t.value.count("\n")
+        t.lexer.lineno += t.value.count("\n") - orig_newlines
     return t
 
 # Escaping from HTML
